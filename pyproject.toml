@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge"
+description = "Forge: Foundational Optimization Representation from Graph Embeddings"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    {name = "skadio"},
+    {name = "zohairshafi"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "dgl",
+    "gurobipy",
+    "igraph",
+    "numpy",
+    "scikit-learn",
+    "torch",
+    "pyyaml"
+]
+dynamic = ["version"]
+
+[project.urls]
+Documentation = "https://github.com/skadio/forge"
+Source = "https://github.com/skadio/forge"
+
+[tool.setuptools.dynamic]
+version = {attr = "forge._version.__version__"}
+
+[tool.setuptools.packages.find]
+exclude = ["*.tests", "*.tests.*", "tests.*", "tests", "notebooks"]
