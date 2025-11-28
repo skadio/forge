@@ -1,3 +1,4 @@
+import os
 import pickle
 from typing import Union, NamedTuple
 
@@ -13,11 +14,29 @@ class Constants(NamedTuple):
     Constant values used by the modules.
     """
 
-    default_train_config_file = "configs/train_config.yaml"
-    """The default train config file."""
+    # Names
+    _DATA_DIR_NAME = "data"
+    _FORGE_DIR_NAME = "forge"
+    _CONFIGS_DIR_NAME = "configs"
+    _MODELS_DIR_NAME = "models"
+    _TEST_DIR_NAME = "tests"
+    _TRAIN_CONFIG_NAME = "train_config.yaml"
+    _MIPINFO_NAME = "mip_to_mipinfo.pkl"
+    _FORGE_PKL_NAME = "forge_pretrained.pkl"
+    _FORGE_LOG_NAME = "forge_pretrain.log"
 
-    default_config_version = "default"
-    """The default config version to use from train_config.yaml."""
+    # Paths
+    _CONST_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _DATA_DIR_NAME
+    DATA_TEST_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _DATA_DIR_NAME
+    MODELS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _MODELS_DIR_NAME
+    CONFIGS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _FORGE_DIR_NAME + os.sep + _CONFIGS_DIR_NAME
+
+    default_train_config_yaml = _CONST_FILE_DIR + os.sep + _CONFIGS_DIR_NAME + os.sep + _TRAIN_CONFIG_NAME
+    default_mip_to_mipinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _MIPINFO_NAME
+    default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_PKL_NAME
+    default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_LOG_NAME
+    """The default train config yaml file."""
 
 
 def params(torch_model):
@@ -44,8 +63,8 @@ def normalize_adj(adj):
     return adj
 
 
-def _overwrite_if_given(default_val, val):
-    return val if val is not None else default_val
+def overwrite_if_given(default_val, val):
+    return default_val if val is None else val
 
 
 def check_false(expression: bool, exception: Exception) -> None:

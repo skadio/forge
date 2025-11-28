@@ -1,19 +1,27 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
 Forge is a research library designed for representational learning in combinatorial problems. 
 
-## Quick Start
+## Quick Start - Pretraining Pipeline
 ```python
-# Import Forge Library
 from forge.embeddings import Forge
+from forge.pipeline import pretrain
 
-# Data
-input_folder = "/data/"
+# Forge model
+forge = Forge(train_config_yaml="forge/configs/train_config.yaml")
 
-# Run
-forge = Forge(train_config_file_path="forge/configs/train_config.yaml")
-forge.train(input_folder=input_folder, output_folder="/models/forge_pretrained.pkl")
+# Pretrain forge
+pretrain(forge,
+         input_mip_folder="/data/train/", 
+         relaxation_list=[0.05, 0.01],
+         output_mip_to_mipinfo_pkl="/models/mip_to_mipinfo.pkl",
+         output_forge_pkl="/models/forge_pretrained.pkl",
+         output_log_file="/models/forge_pretrained.log")
+```
 
-# Inference
+## Quick Start - Pretraining Script
+```bash
+cd forge
+python -m forge.scripts.pretrain --train_config_yaml `/forge/configs/train_config.yaml` --input_mip_folder `/data/train/` --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl `/models/mip_to_mipinfo.pkl` --output_forge_pkl `/models/forge_pretrained.pkl` --output_log_file `/models/forge_pretrained.log`
 ```
 
 ## Installation

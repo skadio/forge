@@ -1,59 +1,45 @@
-import os
-
-import pandas as pd
-
 from forge.embeddings import Forge
-from forge.utils import save_pickle, check_true
+from forge.processor import MIPProcessor
+from forge.utils import check_true
 
 
-def pretrain(forge: Forge, save_file) -> None:
-    """
-    Trains Forge
+def pretrain(forge: Forge,
+             input_mip_folder, relaxation_list,
+             output_mip_to_mipinfo_pkl, output_forge_pkl, output_log_file):
 
-    Parameters
-    ----------
-    forge : Forge
-        The forge models to be trained.
-        The object is updated in-place.
+    _validate_args(forge)
 
-    save_file: str
+    # MIP Processor
+    mip_processor = MIPProcessor(seed=forge.seed)
 
-    Returns
-    -------
-    Returns nothing.
-    """
-    _validate_forge(forge)
-    _validate_args()
-    _validate_save(save_file)
+    # Create MIP to MIPInfo dictionary
+    mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
+                                         output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
+                                         relaxation_list=relaxation_list,
+                                         has_return=False)
 
-    # Import data
-    train_data_df = load_data(data=data)
+    # List of MIPInfo objects for training
+    mipinfo_list = mip_processor.load_mipinfo_from_pickles([output_mip_to_mipinfo_pkl])
 
-    # Save file
-    if save_file is not None:
-        if isinstance(save_file, str):
-            os.makedirs(os.path.dirname(save_file), exist_ok=True)
-            save_pickle(forge, save_file)
-        elif save_file:
-            save_pickle(forge, "recommender.pkl")
+    # Pre-train the Forge model
+    forge.pretrain(input_mipinfo_list=mipinfo_list,
+                   output_forge_pkl=output_forge_pkl,
+                   output_log_file=output_log_file)
 
-def _validate_args():
+def _validate_args(forge, check_trained=False):
 
-    # Train/test data
-    check_true(data is not None, ValueError("Data input cannot be none."))
-    check_true(isinstance(data, (str, pd.DataFrame)),
-               TypeError("Data should be string of filepath or data frame."))
-
-
-def _validate_forge(forge, check_trained=False):
-    check_true(isinstance(forge, Forge), TypeError("Forge input should be a Forge instance."))
+    check_true(isinstance(forge, Forge), TypeError("Error: Forge input should be a Forge instance."))
     if check_trained:
-        check_true(forge.is_trained, ValueError("Forge has not been trained."))
+        check_true(forge.is_trained, ValueError("Error: Forge has not been trained."))
 
-
-def _validate_save(save_file):
-    if save_file is not None:
-        check_true(isinstance(save_file, (bool, str)),
-                   TypeError("Save file should be boolean or a string filepath."))
+    pass
+    # # Train/test data
+    # check_true(data is not None, ValueError("Data input cannot be none."))
+    # check_true(isinstance(data, (str, pd.DataFrame)),
+    #            TypeError("Data should be string of filepath or data frame."))
+    #
+    # if save_file is not None:
+    #     check_true(isinstance(save_file, (bool, str)),
+    #                TypeError("Save file should be boolean or a string filepath."))
 
 

@@ -1,67 +1,137 @@
-import os
-import pickle as pkl
-import time
-from typing import List, Any, Dict, Optional
+"""
+processor.py
 
+Utilities to convert Gurobi MIP instances into graph data structures used by a GNN.
+
+This module provides:
+- MIPInfo: a lightweight container for instance metadata and graph features.
+- MIPProcessor: read MIP files, optionally relaxes them, convert to DGL graphs with node/edge features,
+  and save/load pickled representations.
+
+Notes
+-----
+- Designed to work with gurobipy, DGL, PyTorch and SciPy sparse matrices.
+- Many helper functions assume Gurobi model APIs such as getVars, getConstrs and getA.
+"""
+import os
+import time
+from typing import List, Any, Dict, Optional, Union
+
+import dgl
 import gurobipy as gp
 import numpy as np
 import scipy.sparse as sp
+import torch
 import yaml
 from tqdm import tqdm
 
-from forge.utils import check_true, Constants, _overwrite_if_given, save_pickle
+from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
 
 
 class MIPInfo:
+    """
+    Container for converted MIP instance data.
+
+    Attributes
+    ----------
+    instance_name : str
+        Path or unique identifier of the MIP instance.
+    dgl_graph : Any
+        DGL graph representing the bipartite MIP constraint-variable structure.
+    feature_tensor : torch.FloatTensor
+        Node feature tensor for the DGL graph (constraints first, then variables).
+    num_cons : int
+        Number of constraints in the original MIP.
+    num_vars : int
+        Number of variables in the original MIP.
+    """
+
     def __init__(self,
                  instance_name: str = None,
-                 dgl: Any = None,
-                 feature_matrix=None,
-                 num_constraints: int = None,
-                 num_variables: int = None):
+                 dgl_graph: Any = None,
+                 feature_tensor=None,
+                 num_cons: int = None,
+                 num_vars: int = None):
+
         self.instance_name = instance_name
-        self.dgl = dgl
-        self.feature_matrix = feature_matrix  # TODO: what's the row,column?
-        self.num_constraints = num_constraints
-        self.num_variables = num_variables
+        self.dgl_graph = dgl_graph
+        self.feature_tensor = feature_tensor  # TODO: what's the row,column? is it num_con + num_var, feat_dim=10?
+        self.num_cons = num_cons
+        self.num_vars = num_vars
 
 
 class MIPProcessor:
     """
-    MIP Data processor
+    Processor that converts MIP instances to graph-based features.
+
+    Usage
+    -----
+    - Initialize with an optional training config file to set RNG seeds.
+    - Call convert_mip_to_mipinfo to read MPS/LP files in a folder and produce
+      pickled MIPInfo objects (optionally relaxing constraints).
+    - Use load_mipinfo_from_pickles to aggregate multiple pickles into a list.
+
+    Parameters
+    ----------
+    train_config_file_path : Optional[str]
+        Path to YAML train config. Uses Constants.default_train_config_file by default.
+    seed : Optional[int]
+        Seed to override the config RNG seed.
     """
 
     def __init__(self,
-                 train_config_file_path: Optional[str] = Constants.default_train_config_file,
-                 train_config_version: Optional[str] = Constants.default_config_version,
+                 train_config_file_path: Optional[str] = Constants.train_config_yaml,
                  seed: Optional[int] = None):
+
         super().__init__()
 
-        # Read all configs from the given file
+        # Read train config
         with open(train_config_file_path, 'r') as f:
-            all_configs = yaml.safe_load(f)
+            config = yaml.safe_load(f)
 
-        # Set the selected config
-        config = all_configs.get(train_config_version, {})
+        # Set input parameters
+        self.seed = overwrite_if_given(config.get('seed'), seed)
 
-        self.seed = _overwrite_if_given(config.get('seed'), seed)
+        # Set based on input
+        self.rng = np.random.default_rng(self.seed)
 
-    def convert_mip_to_mipinfo(self, input_folder, output_file, perturb_list=None, has_return=False) \
-            -> Optional[Dict[str, List[Any]]]:
+    def convert_mip_to_mipinfo(self,
+                               input_mip_folder: str,
+                               output_mip_to_mipinfo_pkl: str,
+                               relaxation_list: Optional[List[float]] = None,
+                               is_save_relaxed: bool = False,
+                               has_return: bool = False) -> Optional[Dict[str, MIPInfo]]:
         """
-            input_folder : path of directory with MPS / LP files
-            output_file : path and file name to save processed list of instances
-            perturb : list of perturbation ratios between 0-1 to create new instances by randomly dropping constraints
-            has_return : If true, returns the mip_to_dgl dictionary else only writes to file
+        Converts MIP instances in a given folder to MIPInfo objects and saves them to a pickle file.
 
-            Returns: Dictionary mapping MIP file paths to [DGL graph, feature matrix, num_constraints, num_variables]
+        Parameters
+        ----------
+        input_mip_folder : str
+            Path to the directory containing MIP instance files (`.mps` or `.lp`).
+        output_mip_to_mipinfo_pkl : str
+            Path where the resulting pickled mapping of instance names to `MIPInfo` objects will be saved.
+        relaxation_list : Optional[List[float]], default: None
+            If provided, for each instance a set of relaxed instances will be generated by randomly
+            removing the specified fraction(s) of constraints (values between 0 and 1).
+            Only one relaxed instance is created per ratio in the list.
+        is_save_relaxed : bool, default: False
+            If True, relaxed MIP instances are written to disk using the original name, plus the relaxation ratio.
+        has_return : bool, default: False
+            If True the function returns the dictionary mapping instance names to `MIPInfo`,
+            otherwise it returns None after saving to `output_file`.
+
+        Returns
+        -------
+        Optional[Dict[str, List[Any]]]
+            The dictionary mapping instance file paths (or relaxed names) to `MIPInfo` when `has_return` is True;
+            Otherwise None.
         """
 
-        if perturb_list is None:
-            perturb_list = []
+        if relaxation_list is None:
+            relaxation_list = []
 
-        all_files = os.listdir(input_folder)
-        files_and_sizes = [os.path.join(input_folder, path) for path in all_files]
+        all_files = os.listdir(input_mip_folder)
+        files_and_sizes = [os.path.join(input_mip_folder, path) for path in all_files]
         files_and_sizes = [x for x in files_and_sizes if 'mps' in x or 'lp' in x]
         sorted_instances = sorted(files_and_sizes, key=os.path.getsize)
 
@@ -74,180 +144,224 @@ class MIPProcessor:
         gurobi_venv.setParam("OutputFlag", 0)
         gurobi_venv.start()
 
+        # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_instances))):
 
-            # Read MPS file
+            # Read MIP file to a Gurobi model
             mip_model = gp.read(sorted_instances[idx], env=gurobi_venv)
 
-            # Generate MIPInfo object
-            mip_info = self.generate_mip_info(mip_model)
+            # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
+            mip_info = self._generate_mip_info(mip_model)
             mip_info.instance_name = sorted_instances[idx]
             mip_to_mipinfo[mip_info.instance_name] = mip_info
 
-            if perturb_list:
-                for ratio in perturb_list:
-                    mip_model = gp.read(sorted_instances[idx], env=gurobi_venv)
-
+            if relaxation_list:
+                for ratio in relaxation_list:
                     # Randomly remove a given ratio of constraints to create a new MIP instance
-                    # TODO this needs to have a seed for reproducibility. See the default self.seed
-                    # TODO should we be saving these perturbed instances to disk? Add a flag to enable save?
                     cons = mip_model.getConstrs()
-                    cons_remove_ = np.random.choice(cons, int(len(cons) * ratio), replace=False)
+                    cons_remove_ = self.rng.choice(cons, int(len(cons) * ratio), replace=False)
                     for c in cons_remove_:
                         mip_model.remove(c)
                     mip_model.update()
 
-                    # Generate MIPInfo object
-                    mip_info = self.generate_mip_info(mip_model)
-                    mip_info.instance_name = sorted_instances[idx] + '_perturbed_' + str(ratio)
+                    # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
+                    mip_info = self._generate_mip_info(mip_model)
+                    mip_info.instance_name = sorted_instances[idx] + '_relaxed_' + str(ratio)
                     mip_to_mipinfo[mip_info.instance_name] = mip_info
 
-                    # TODO: I think you can add constraints back and update the model instead of re-reading it
-                    # TODO: this way, you can remove gp.read() in the for ratio loop
+                    # Save the perturbed MIP instance to disk
+                    if is_save_relaxed:
+                        mip_model.write(mip_info.instance_name)
 
-        save_pickle(mip_to_mipinfo, output_file)
+                    # Re-add removed constraints to restore original model for next iteration
+                    for c in cons_remove_:
+                        mip_model.addConstrs(c)
+                    mip_model.update()
+
+        save_pickle(mip_to_mipinfo, output_mip_to_mipinfo_pkl)
 
         return mip_to_mipinfo if has_return else None
 
     @staticmethod
-    def get_train_list(self, path_list) -> List[List[Any]]:
+    def load_mipinfo_from_pickles(mip_to_mipinfo_files: List[str]) -> List[MIPInfo]:
         """
-        path_list : List of paths of mip_to_dgl dictionaries generated by calling get_instance_dict()
-        """
-        train_list = []
-        for p in path_list:
-            with open(p, 'rb') as file:
-                mip_to_dgl = pkl.load(file)
-            for inst_name in mip_to_dgl:
-                train_list.append(mip_to_dgl[inst_name])
+        Load and aggregate lists of MIPInfo objects from multiple pickled files.
 
-        return train_list
+        Parameters
+        ----------
+        mip_to_mipinfo_files : List[str]
+            List of paths to pickled mappings (saved by `convert_mip_to_mipinfo`).
+
+        Returns
+        -------
+        List[MIPInfo]
+            Flattened list of `MIPInfo` objects.
+        """
+        mipinfo_list = []
+        for mip_to_mipinfo_file in mip_to_mipinfo_files:
+            mip_to_mipinfo = load_pickle(mip_to_mipinfo_file)
+            for mip in mip_to_mipinfo:
+                mipinfo_list.append(mip_to_mipinfo[mip])
+        return mipinfo_list
 
     @staticmethod
-    def get_dgl_graph(adj, feats, coeff_adj):
+    def _generate_mip_info(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
         """
-        Called by generate_mip_graph()
-        Returns a DGL object
+        Convert a Gurobi model into a MIPInfo.
+
+        The produced MIPInfo contains:
+        - `dgl_graph`: a bipartite graph where the first `num_cons` nodes are constraints
+          and the next `num_vars` nodes are variables.
+        - `feature_tensor`: node features stacked with constraints first then variables.
+        - `num_cons`, `num_vars`: counts used to interpret the graph layout.
+
+        Parameters
+        ----------
+        mip_model : gp.Model
+            The Gurobi model to convert. The function will mutate the model (remove zero-columns)
+            to ensure a valid bipartite incidence.
+        is_debug : bool
+            If True, prints timing/debug information.
+
+        Returns
+        -------
+        Union[bool, MIPInfo]
+            Returns False on irrecoverable failure, an empty MIPInfo on soft failure,
+            or a populated MIPInfo on success.
         """
-
-        coeff_adj_coo = coeff_adj.tocoo()
-        edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
-        edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
-        edge_weights += 1e-4
-
-        features = torch.FloatTensor(np.array(feats))
-        # adj = normalize_adj(adj)
-
-        if not adj:
-            return False
-
-        adj_sp = adj.tocoo()
-        g = dgl.graph((adj_sp.row, adj_sp.col))
-        g.ndata["feat"] = features
-        g.edata["weight"] = torch.FloatTensor(edge_weights).T
-
-        check_true(g.num_nodes() == g.ndata["feat"].shape[0],
-                   ValueError(f"Error: graph has {g.num_nodes()} nodes but "
-                              f"feature matrix has {g.ndata['feat'].shape[0]} rows"))
-        return g
-
-    @staticmethod
-    def generate_mip_info(mip_model, is_debug=False):
 
         # TODO: this block needs some commentary explaining what is being done at a high level
+        # Is this needed because of relaxed instances?
         to_remove = [v for v in mip_model.getVars() if not mip_model.getCol(v).size()]
         mip_model.remove(to_remove)
         mip_model.update()
 
-        # Get constraint matrix
-        coefficient_matrix = mip_model.getA().todense()
-        A = (coefficient_matrix != 0).astype(int)
-
         # Get objective equation
         # obj = np.array([x.Obj for x in mip_model.getVars()])
 
-        # Create feature vectors for each variable
-        variables = mip_model.getVars()
-        var_feature_vector = []
-        for v in variables:
-            feat = [v.VType == gp.GRB.CONTINUOUS,
-                    v.VType == gp.GRB.BINARY,
-                    v.VType == gp.GRB.INTEGER,
-                    v.Obj,
-                    v.LB > -gp.GRB.INFINITY,
-                    v.UB <= gp.GRB.INFINITY]
-            feat = [float(x) for x in feat]
-            var_feature_vector.append(feat)
-
-        # Create feature vectors for each constraint
-        constraints = mip_model.getConstrs()
-        operators = mip_model.Sense
-        constraints_feature_vector = []
-        for c, o in list(zip(constraints, operators)):
-            feat = [o == '=',
-                    o == '<',
-                    o == '>',
-                    c.RHS]
-            feat = [float(x) for x in feat]
-            constraints_feature_vector.append(feat)
-
-        num_cons = len(constraints)
-        num_vars = len(variables)
-
         s = 0
         if is_debug:
-            print("Creating Adjacency")
+            print("Compute Feature Tensor")
             s = time.time()
 
-        # Create graph
-        adj = np.block([[np.zeros((num_cons, num_cons)), A],
-                        [A.T, np.zeros((num_vars, num_vars))]])
-        coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
-                              [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
-        if is_debug:
-            print("Graph Created in ", time.time() - s, "seconds")
+        # Get feature tensor, number of constraints, and number of variables
+        feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
         if is_debug:
-            print("Computing Feature Vectors")
-            s = time.time()
+            print("Feature Tensor Computed in ", time.time() - s, "seconds")
 
-        # Create feature matrix
-        constraints_feature_vector = np.array(constraints_feature_vector)
-        var_feature_vector = np.array(var_feature_vector)
-
-        # Pad with zeros for equal shapes
-        constraints_feature_matrix = np.hstack([constraints_feature_vector,
-                                                np.zeros((num_cons, var_feature_vector.shape[1]))])
-
-        var_feature_matrix = np.hstack([np.zeros((num_vars, constraints_feature_vector.shape[1])),
-                                        var_feature_vector])
-
-        # Stack up into one feature matrix
-        features = np.vstack([constraints_feature_matrix, var_feature_matrix])
-
-        # Column normalize
-        features = (features - np.min(features, axis=0)) / (np.max(features, axis=0) - np.min(features, axis=0) + 1e-9)
-        features[np.isnan(features)] = 0
-        if is_debug:
-            print("Feature Vectors Computed in ", time.time() - s, "seconds")
-
-        # Create DGL graph
         if is_debug:
             print("Creating DGL Graph")
             s = time.time()
 
-        dgl = MIPProcessor.get_dgl_graph(sp.csr_matrix(adj), features, sp.csr_matrix(coeff_adj))
+        # Get constraint matrix TODO comment on what's adj and coeff_adj
+        coefficient_matrix = mip_model.getA().todense()
+        A = (coefficient_matrix != 0).astype(int)
 
-        if dgl is False:
+        adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
+        if not adj:
+            return False
+        # adj = normalize_adj(adj)
+        adj_sp = sp.csr_matrix(adj)
+        adj_coo = adj_sp.tocoo()
+
+        # Create DGL graph
+        dgl_graph = dgl.graph((adj_coo.row, adj_coo.col))
+        if not dgl_graph:
             if is_debug:
                 print("WARNING: DGL returned false, MIPInfo is empty")
             return MIPInfo()
-
-        # TODO: what's rows/columns of feature matrix? comment here
-        feature_matrix = dgl.ndata["feat"]
-
         if is_debug:
-            print("DGL Graph Created in ", time.time() - s, "seconds")
+            print("Graph Created in ", time.time() - s, "seconds")
 
-        return MIPInfo(dgl=dgl, feature_matrix=feature_matrix, num_constraints=num_cons, num_variables=num_vars)
+        # TODO should this block use coefficient_matrix or A?
+        coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
+                              [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
+        coeff_adj_sp = sp.csr_matrix(coeff_adj)
+        coeff_adj_coo = coeff_adj_sp.tocoo()
+
+        # TODO: commentary explaining the normalization and edge weight computation
+        edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
+        edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
+        edge_weights += 1e-4
+
+        # TODO so we are adding custom fields to the dgl graph here? Some comment would be helpful
+        # TODO what's row/column of edge tensor? (after transpose)
+        dgl_graph.ndata["feat"] = feature_tensor
+        dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
+
+        check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
+                   ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
+                              f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
+
+        # TODO not sure why we are returning dgl_graph and feature_tensor separately since
+        # feature_tensor is already stored in dgl_graph.ndata["feat"]
+        # and by the same token, why MIPInfo does not have edge_tensor?
+        return MIPInfo(dgl_graph=dgl_graph,
+                       feature_tensor=dgl_graph.ndata["feat"],
+                       num_cons=num_cons,
+                       num_vars=num_vars)
+
+    @staticmethod
+    def _get_feature_tensor_num_cons_num_vars(mip_model):
+        """
+        Extract node-level features from a Gurobi model.
+
+        The function produces a feature tensor where rows correspond to nodes:
+        first `num_cons` rows are constraint features, followed by `num_vars` rows
+        of variable features. Features are column-normalized to [0, 1].
+
+        Parameters
+        ----------
+        mip_model : gp.Model
+            Gurobi model to extract features from.
+
+        Returns
+        -------
+        tuple
+            (feature_tensor: torch.FloatTensor, num_cons: int, num_vars: int)
+        """
+
+        # Create variable features
+        variables = mip_model.getVars()
+        num_vars = len(variables)
+        num_variable_features = 6
+        features_of_var = np.zeros((num_vars, num_variable_features), dtype=float)
+        for i, var in enumerate(variables):
+            features_of_var[i, 0] = float(var.VType == gp.GRB.CONTINUOUS)
+            features_of_var[i, 1] = float(var.VType == gp.GRB.BINARY)
+            features_of_var[i, 2] = float(var.VType == gp.GRB.INTEGER)
+            features_of_var[i, 3] = float(var.Obj)
+            features_of_var[i, 4] = float(var.LB > -gp.GRB.INFINITY)
+            features_of_var[i, 5] = float(var.UB <= gp.GRB.INFINITY)
+
+        # Create constraint features
+        constraints = mip_model.getConstrs()
+        operators = mip_model.Sense
+        num_cons = len(constraints)
+        num_constraint_features = 4
+        features_of_constraint = np.zeros((num_cons, num_constraint_features), dtype=float)
+        for c, o in list(zip(constraints, operators)):
+            features_of_constraint[c, 0] = float(o == '=')
+            features_of_constraint[c, 1] = float(o == '<')
+            features_of_constraint[c, 2] = float(o == '>')
+            features_of_constraint[c, 3] = float(c.RHS)
+
+        # Pad with zeros for equal shapes
+        var_feat_matrix = np.hstack([np.zeros((num_vars, features_of_constraint.shape[1])), features_of_var])
+        cons_feat_matrix = np.hstack([features_of_constraint, np.zeros((num_cons, features_of_var.shape[1]))])
+
+        # Stack up into one feature matrix, constraints come first
+        feature_matrix = np.vstack([cons_feat_matrix, var_feat_matrix])
+
+        # Column normalize features
+        feature_matrix = (feature_matrix - np.min(feature_matrix, axis=0)) / (
+                    np.max(feature_matrix, axis=0) - np.min(feature_matrix, axis=0) + 1e-9)
+        feature_matrix[np.isnan(feature_matrix)] = 0
+
+        # Convert features to tensor
+        feature_tensor = torch.FloatTensor(np.array(feature_matrix))
+
+        # Return feature tensor, number of constraints, and number of variables
+        return feature_tensor, num_cons, num_vars
