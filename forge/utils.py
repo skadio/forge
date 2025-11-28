@@ -1,9 +1,8 @@
 import pickle
+from typing import Union, NamedTuple
 
-from typing import Dict, Union, NamedTuple, NewType, NoReturn
 import numpy as np
 import scipy.sparse as sp
-
 
 Num = Union[int, float]
 """Num type is defined as integer or float."""

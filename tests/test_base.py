@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-from typing import List, Union, Optional
+from typing import List, Union
 
 
 class BaseTest(unittest.TestCase):

@@ -1,7 +1,7 @@
+import argparse
+
 from forge.embeddings import Forge
 from forge.processor import MIPProcessor
-
-import argparse
 
 
 def run(train_config_file_path, train_config_version, input_folder, output_mip_info_file, output_forge_file, perturb_list):

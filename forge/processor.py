@@ -1,15 +1,15 @@
-from typing import List, Any, Dict, Optional
-import numpy as np
 import os
-from tqdm import tqdm
 import pickle as pkl
+import time
+from typing import List, Any, Dict, Optional
 
 import gurobipy as gp
-
-import time
+import numpy as np
 import scipy.sparse as sp
 import yaml
-from forge.utils import Num, check_true, Constants, _overwrite_if_given, save_pickle
+from tqdm import tqdm
+
+from forge.utils import check_true, Constants, _overwrite_if_given, save_pickle
 
 
 class MIPInfo:

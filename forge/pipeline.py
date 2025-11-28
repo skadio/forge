@@ -1,9 +1,10 @@
 import os
-from typing import Dict, List, Tuple, Union
+
 import pandas as pd
-import numpy as np
+
 from forge.embeddings import Forge
-from forge.utils import Constants, save_pickle, load_pickle, check_true, check_false
+from forge.utils import save_pickle, check_true
+
 
 def pretrain(forge: Forge, save_file) -> None:
     """

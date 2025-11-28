@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 
-import random
-import logging
-import numpy as np
-import pandas as pd
-from tests.test_base import BaseTest
 from forge.embeddings import Forge
+from tests.test_base import BaseTest
+
 
 class ExampleTest(BaseTest):
 

@@ -1,36 +1,19 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# SPDX-License-Identifier: Apache-2.0
-
-"""
-This module defines the public interface of the **Forge Library**.
-"""
-
-from typing import List, Union, Dict, NamedTuple, NoReturn, Callable, Optional
-import yaml
-from forge.utils import Num, check_true, Constants, _overwrite_if_given
-
 import time
+from typing import List, Callable, Optional
+
 import dgl
-from dgl.nn import SAGEConv
-
-# TODO consider changing with the other library to remove the code copy to a fix/static version
-from vqgraph.vq import VectorQuantize
-from sklearn.decomposition import PCA
-from tqdm import tqdm
-
+import gurobipy as gp
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.onnx.symbolic_opset12 import dropout
+import yaml
+from dgl.nn import SAGEConv
 
-import numpy as np
-from sklearn.metrics.cluster import contingency_matrix
-
-import gurobipy as gp
-from gurobipy import GRB
-
+from forge.utils import check_true, Constants, _overwrite_if_given
+# TODO consider changing with the other library to remove the code copy to a fix/static version
+from vqgraph.vq import VectorQuantize
 
 try:
     from gurobi_onboarder import init_gurobi

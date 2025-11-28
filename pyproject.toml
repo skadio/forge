@@ -17,10 +17,13 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "category-encoders",
     "dgl",
     "gurobipy",
-    "igraph",
+    "marimo[recommended]",
     "numpy",
+    "ogb",
+    "pandas",
     "scikit-learn",
     "scipy",
     "torch",
