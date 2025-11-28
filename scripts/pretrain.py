@@ -1,5 +1,5 @@
 from forge.embeddings import Forge
-from forge.processor import DataProcessor
+from forge.processor import MIPProcessor
 
 import argparse
 
@@ -7,7 +7,7 @@ import argparse
 def run(train_config_file_path, train_config_version, input_folder, output_mip_info_file, output_forge_file, perturb_list):
 
     # Process MIP instances to MIPInfo Objects
-    dp = DataProcessor()
+    dp = MIPProcessor()
     dp.convert_mip_to_mipinfo(input_folder=input_folder,
                               output_file=output_file,
                               perturb_list=perturb_list,

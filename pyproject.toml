@@ -22,6 +22,7 @@ dependencies = [
     "igraph",
     "numpy",
     "scikit-learn",
+    "scipy",
     "torch",
     "pyyaml"
 ]

@@ -1,18 +1,19 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
-
-Forge is a research library for representational learning of combinatorial problems using graph embeddings.
+Forge is a research library designed for representational learning in combinatorial problems. 
 
 ## Quick Start
-
 ```python
-# Import ???? Library
-from ????.xx import xx
+# Import Forge Library
+from forge.embeddings import Forge
 
 # Data
-xx .. 
+input_folder = "/data/"
 
 # Run
-xx
+forge = Forge(train_config_file_path="forge/configs/train_config.yaml")
+forge.train(input_folder=input_folder, output_folder="/models/forge_pretrained.pkl")
+
+# Inference
 ```
 
 ## Installation
@@ -35,11 +36,9 @@ $ python -m unittest discover tests
 ```
 
 ## Support
-
 Please submit bug reports and feature requests as [Issues](https://github.com/skadio/forge/issues).
 
 ## License
-
 Forge is licensed under the [Apache License 2.0](LICENSE.md).
 
 <br>

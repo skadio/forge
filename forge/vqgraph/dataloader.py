@@ -600,7 +600,7 @@ def sample_per_class(
     random_state, labels, num_examples_per_class, forbidden_indices=None
 ):
     """
-    Used in get_train_val_test_split, when we try to get a fixed number of examples per class
+    Used in get_train_val_test_split, when we try to get a fixed number of scripts per class
     """
 
     num_samples, num_classes = labels.shape
@@ -642,7 +642,7 @@ def get_train_val_test_split(
     if train_examples_per_class is not None:
         train_indices = sample_per_class(random_state, labels, train_examples_per_class)
     else:
-        # select train examples with no respect to class distribution
+        # select train scripts with no respect to class distribution
         train_indices = random_state.choice(
             remaining_indices, train_size, replace=False
         )

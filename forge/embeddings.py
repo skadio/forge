@@ -43,7 +43,6 @@ class Forge(nn.Module):
 
     def __init__(self,
                  train_config_file_path: Optional[str] = Constants.default_train_config_file,
-                 train_config_version: Optional[str] = Constants.default_config_version,
                  input_dim: Optional[int] = None,
                  hidden_dim: Optional[int] = None,
                  codebook_dim: Optional[int] = None,
@@ -68,6 +67,14 @@ class Forge(nn.Module):
 
             Parameters
             ----------
+            train_config_file_path : Optional[str], default=Constants.default_train_config_file
+                Path to a YAML configuration file that provides default training and model
+                hyperparameters. When provided, values from this file are loaded and used
+                unless explicitly overridden via constructor arguments. The path is validated
+                by `_validate_args` and must point to an existing readable file; passing
+                `None` will raise a ValueError. Typical keys expected in the file include
+                `input_dim`, `hidden_dim`, `codebook_dim`, `dropout_ratio`, and other
+                parameters documented below.
             input_dim : int, default=10
                 Dimensionality of the raw node features provided in `feats` during `forward`.
                 If `input_dim < hidden_dim` the models internally projects to `hidden_dim`
@@ -171,12 +178,11 @@ class Forge(nn.Module):
 
         super().__init__()
 
+        self._validate_args(train_config_file_path)
+
         # Read all configs from the given file
         with open(train_config_file_path, 'r') as f:
-            all_configs = yaml.safe_load(f)
-
-        # Set the selected config
-        config = all_configs.get(train_config_version, {})
+            config = yaml.safe_load(f)
 
         # Default to config values, but overwrite if a value is given
         self.input_dim = _overwrite_if_given(config.get('input_dim'), input_dim)
@@ -519,10 +525,23 @@ class Forge(nn.Module):
             self.is_trained = True
 
     @staticmethod
-    def _validate_args(seed) -> None:
+    def _validate_args(train_config_file_path) -> None:
         """
         Validates arguments for the constructor.
         """
 
-        # Seed
-        check_true(isinstance(seed, int), TypeError("The seed must be an integer."))
+        # Validate train_config_file_path
+        check_true(train_config_file_path is not None,
+                   ValueError("Error: train_config_file_path cannot be None"))
+        check_true(isinstance(train_config_file_path, str),
+                   TypeError(f"Error: train_config_file_path must be a string, "
+                             f"got {type(train_config_file_path).__name__}"))
+        check_true(train_config_file_path.strip(),
+                   ValueError("Error train_config_file_path cannot be empty or whitespace"))
+
+        import os
+        check_true(os.path.exists(train_config_file_path),
+                   FileNotFoundError(f"Error: Configuration file not found: {train_config_file_path}"))
+        check_true(os.path.isfile(train_config_file_path),
+                   ValueError(f"Error: train_config_file_path must be a file, "
+                              f"not a directory: {train_config_file_path}"))

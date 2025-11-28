@@ -1,14 +1,9 @@
-# -*- coding: utf-8 -*-
-# SPDX-License-Identifier: Apache-2.0
-
-"""
-:Author:
-
-This module provides a number of constants and helper functions.
-"""
 import pickle
 
 from typing import Dict, Union, NamedTuple, NewType, NoReturn
+import numpy as np
+import scipy.sparse as sp
+
 
 Num = Union[int, float]
 """Num type is defined as integer or float."""
@@ -19,11 +14,35 @@ class Constants(NamedTuple):
     Constant values used by the modules.
     """
 
-    default_train_config_file = "train_config.yaml"
+    default_train_config_file = "configs/train_config.yaml"
     """The default train config file."""
 
     default_config_version = "default"
     """The default config version to use from train_config.yaml."""
+
+
+def params(torch_model):
+    """
+    Return number of parameters in a torch model
+    """
+    return sum(p.numel() for p in torch_model.parameters() if p.requires_grad)
+
+
+def normalize(mx):
+    """
+    Row-normalize sparse matrix
+    """
+    rowsum = np.array(mx.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.0
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx
+
+
+def normalize_adj(adj):
+    adj = normalize(adj + sp.eye(adj.shape[0]))
+    return adj
 
 
 def _overwrite_if_given(default_val, val):
@@ -60,3 +79,5 @@ def save_pickle(obj, pickle_file) -> None:
     """
     with open(pickle_file, 'wb') as fp:
         pickle.dump(obj, fp)
+
+
