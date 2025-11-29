@@ -1,5 +1,5 @@
 import time
-from typing import List, Callable, Optional, Tuple, Union
+from typing import List, Callable, Optional, Tuple, Union, Dict
 
 import dgl
 import gurobipy as gp
@@ -10,8 +10,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import yaml
 from dgl.nn import SAGEConv
-from torch.fx.experimental.unification import variables
 
+from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given
 # TODO consider changing with the other library to remove the code copy to a fix/static version
@@ -24,20 +24,19 @@ class Forge(nn.Module):
     This class constructs a GraphSAGE-based encoder, optional prediction heads, and a vector quantization module.
 
     """
+
     def __init__(self,
                  train_config_yaml: Optional[str] = Constants.default_train_config_yaml,
                  input_dim: Optional[int] = None,
                  hidden_dim: Optional[int] = None,
-                 codebook_dim: Optional[int] = None,
+                 codeword_dim: Optional[int] = None,
+                 codebook_size: Optional[int] = None,
                  dropout_ratio: Optional[float] = None,
                  activation: Optional[Callable] = None,
                  norm_type: Optional[str] = None,
-                 codebook_size: Optional[int] = None,
                  lambda_edge: Optional[float] = None,
                  lambda_node: Optional[float] = None,
                  orthogonal_reg_weight: Optional[float] = None,
-                 has_integral_gap_head: Optional[bool] = None,
-                 has_variable_proba_head: Optional[bool] = None,
                  is_eval_mode: Optional[bool] = None) -> None:
         """Initialize the Forge models.
 
@@ -68,10 +67,16 @@ class Forge(nn.Module):
                 Acts as the working dimensionality for message passing.
                 Larger values increase models capacity and decoder parameter count,
                 potentially improving reconstruction at the cost of memory.
-            codebook_dim : int, default=1024
+            codeword_dim : int, default=1024
                 Dimensionality of each code vector in the vector quantization (VQ) codebook(s).
                 Can be set lower than `hidden_dim` to encourage compression, or equal for lossless capacity.
                 Impacts the expressiveness of discrete embeddings used for mip vector representations.
+            codebook_size : int, default=5000
+                Number of discrete codes available to the VQ module(s).
+                Larger sizes increase capacity for representing structural diversity in MIP graphs.
+                Smaller sizes enforce stronger sharing and can improve generalization,
+                    but may hurt fine-grained reconstruction.
+                Also, determines the length of the distribution vector returned by `mip_to_embeddings`.
             dropout_ratio : float, default=0.4
                 Dropout applied after major transformation blocks (GraphSAGE layers and linear layer).
                 Higher values regularize more aggressively.
@@ -84,12 +89,6 @@ class Forge(nn.Module):
                 Type of optional additional normalization applied via `self.norms` (if populated outside this snippet).
                 When set to values other than "none", an auxiliary normalization module is expected at index 0,
                 refining stability across instances. Setting "none" skips that step.
-            codebook_size : int, default=5000
-                Number of discrete codes available to the VQ module(s).
-                Larger sizes increase capacity for representing structural diversity in MIP graphs.
-                Smaller sizes enforce stronger sharing and can improve generalization,
-                    but may hurt fine-grained reconstruction.
-                Also, determines the length of the distribution vector returned by `mip_to_vector`.
             lambda_edge : float, default=1
                 Weight scaling the edge reconstruction portion of the unsupervised loss.
                 During training, the implementation alternates emphasizing edges vs. nodes,
@@ -103,17 +102,6 @@ class Forge(nn.Module):
                 Non-zero values push code vectors toward mutual orthogonality,
                     reducing redundancy and encouraging diverse discrete assignments.
                 Typically small (e.g. 0.1–0.5) if used.
-            has_integral_gap_head : bool, default=False
-                Enables a cut prediction head (`integral_gap_layer`) for,
-                    LP gap / cut ratio estimation tasks.
-                Used in `mip_to_lp_cut` workflows.
-                When active, an additional scalar per variable is produced.
-            has_variable_proba_head : bool, default=False
-                Enables a probability prediction head (`variable_proba_layer`) for,
-                    variable membership solution likelihood tasks (BCE loss).
-                Activating this adds parameters and changes the forward outputs,
-                    appending probability tensors to `h_list`.
-                Required for warm-start and triplet training phases.
             is_eval_mode : bool, default=False
                 If True, the forward pass omits reconstruction loss computation,
                     skips adjacency matrix extraction and loss terms for faster inference and hint generation.
@@ -138,6 +126,15 @@ class Forge(nn.Module):
                 enabling them adds tasks that can regularize embeddings beyond pure reconstruction.
             - is_eval_mode allows deterministic embedding / code assignment without incurring the cost of
                 computing reconstruction losses and adjacency transforms, important for downstream MIP heuristics.
+            - has_integral_gap_head enables a cut prediction head (`integral_gap_layer`) for,
+                    LP gap / cut ratio estimation tasks.
+                Used in `mip_to_lp_cut` workflows.
+                When active, an additional scalar per variable is produced.
+            has_variable_proba_head enables a probability prediction head (`variable_proba_layer`) for,
+                    variable membership solution likelihood tasks (BCE loss).
+                Activating this adds parameters and changes the forward outputs,
+                    appending probability tensors to `h_list`.
+                Required for warm-start and triplet training phases.
 
             Returns
             -------
@@ -162,20 +159,18 @@ class Forge(nn.Module):
             config = yaml.safe_load(f)
 
         # Default to config values, but overwrite if a value is given
-        self.input_dim = overwrite_if_given(config.get('input_dim'), input_dim)
-        self.hidden_dim = overwrite_if_given(config.get('hidden_dim'), hidden_dim)
-        self.codebook_dim = overwrite_if_given(config.get('codebook_dim'), codebook_dim)
-        self.dropout_ratio = overwrite_if_given(config.get('dropout_ratio'), dropout_ratio)
-        self.activation = overwrite_if_given(config.get('activation'), activation)
-        self.norm_type = overwrite_if_given(config.get('norm_type'), norm_type)
-        self.codebook_size = overwrite_if_given(config.get('codebook_size'), codebook_size)
-        self.lambda_edge = overwrite_if_given(config.get('lambda_edge'), lambda_edge)
-        self.lambda_node = overwrite_if_given(config.get('lambda_node'), lambda_node)
-        self.orthogonal_reg_weight = overwrite_if_given(config.get('orthogonal_reg_weight'), orthogonal_reg_weight)
-        self.has_integral_gap_head = overwrite_if_given(config.get('has_integral_gap_head'), has_integral_gap_head)
-        self.has_variable_proba_head = overwrite_if_given(config.get('has_variable_prob_head'),
-                                                          has_variable_proba_head)
-        self.is_eval_mode = overwrite_if_given(config.get('is_eval_mode'), is_eval_mode)
+        self.input_dim: int = overwrite_if_given(config.get('input_dim'), input_dim)
+        self.hidden_dim: int = overwrite_if_given(config.get('hidden_dim'), hidden_dim)
+        self.codeword_dim: int = overwrite_if_given(config.get('codeword_dim'), codeword_dim)
+        self.codebook_size: int = overwrite_if_given(config.get('codebook_size'), codebook_size)
+        self.dropout_ratio: float = overwrite_if_given(config.get('dropout_ratio'), dropout_ratio)
+        self.activation: Callable = overwrite_if_given(config.get('activation'), activation)
+        self.norm_type: str = overwrite_if_given(config.get('norm_type'), norm_type)
+        self.lambda_edge: float = overwrite_if_given(config.get('lambda_edge'), lambda_edge)
+        self.lambda_node: float = overwrite_if_given(config.get('lambda_node'), lambda_node)
+        self.orthogonal_reg_weight: float = overwrite_if_given(config.get('orthogonal_reg_weight'),
+                                                               orthogonal_reg_weight)
+        self.is_eval_mode: bool = overwrite_if_given(config.get('is_eval_mode'), is_eval_mode)
 
         # Load additional parameters
         # TODO should these also be in __init__ input to overwrite as above? Seems "fixed", no need to overwrite?
@@ -186,7 +181,7 @@ class Forge(nn.Module):
         self.vq_is_cosine_sim: bool = config.get('vq_is_cosine_sim')
 
         # Load default training parameters
-        self.train_epochs: int = config.get('train_epochs')
+        self.epochs: int = config.get('epochs')
         self.steps_per_instance: int = config.get('steps_per_instance')
         self.learning_rate: float = config.get('learning_rate')
         self.max_dgl_nodes: int = config.get('max_dgl_nodes')
@@ -194,12 +189,16 @@ class Forge(nn.Module):
         # Load seed
         self.seed: int = config.get('seed')
 
+        # Initialize without downstream heads. load_model() can set these later.
+        self.has_integral_gap_head: bool = False
+        self.has_variable_proba_head: bool = False
+
         # Update input dim if needed
         # TODO when/why would this happen? some commentary?
-        if input_dim < hidden_dim:
-            self.updated_input_dim = hidden_dim
+        if self.input_dim < self.hidden_dim:
+            self.updated_input_dim = self.hidden_dim
         else:
-            self.updated_input_dim = input_dim
+            self.updated_input_dim = self.input_dim
 
         # Set fields based on input parameters
         self.dropout = nn.Dropout(dropout_ratio)
@@ -215,7 +214,7 @@ class Forge(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Graph layers
-        self.graph_layer_1 = SAGEConv(input_dim, self.updated_input_dim,
+        self.graph_layer_1 = SAGEConv(self.input_dim, self.updated_input_dim,
                                       activation=activation, aggregator_type=self.graph_sage_aggregation)
         self.graph_layer_2 = SAGEConv(self.updated_input_dim, self.updated_input_dim,
                                       activation=activation, aggregator_type=self.graph_sage_aggregation)
@@ -244,10 +243,34 @@ class Forge(nn.Module):
                                  commitment_weight=self.vq_commitment_weight,
                                  use_cosine_sim=self.vq_is_cosine_sim,
                                  orthogonal_reg_weight=self.orthogonal_reg_weight,
-                                 codebook_dim=self.codebook_dim)
+                                 codebook_dim=self.codeword_dim)
+
+    def load_model(self, input_forge_pkl, model_type=Constants.FORGE_PRE_TRAIN):
+
+        if self.is_trained:
+            print("Warning: Forge model is already trained, NOT loading weights!!")
+            pass
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self = self.to(device)
+
+        if model_type == Constants.FORGE_PRE_TRAIN:
+            self.has_integral_gap_head = False
+            self.has_variable_proba_head = False
+        elif model_type == Constants.FORGE_FINE_TUNE_INTEGRAL_GAP:
+            # TODO why are we setting both to true for integral gap??
+            self.has_integral_gap_head = True
+            self.has_variable_proba_head = True
+        elif model_type == Constants.FORGE_FINE_TUNE_VARIABLE_PROBA:
+            self.has_integral_gap_head = False
+            self.has_variable_proba_head = True
+
+        self.load_state_dict(torch.load(input_forge_pkl, map_location=device))
+        self.is_trained = True
 
     def forward(self, dgl_graph: dgl.DGLGraph, feature_matrix: torch.Tensor, num_cons: int, num_vars: int) \
-            -> Tuple[List[torch.Tensor], torch.Tensor, Union[torch.Tensor, int], torch.Tensor, Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
+            -> Tuple[List[torch.Tensor], torch.Tensor, Union[torch.Tensor, int], torch.Tensor, Union[
+                torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
         """Forward pass of the Forge models.
 
         Parameters
@@ -398,33 +421,11 @@ class Forge(nn.Module):
 
         return h_list, h, loss, dist, codebook
 
-    def load_model(self, input_forge_pkl, model_type=Constants.FORGE_PRE_TRAINED):
-
-        if self.is_trained:
-            pass
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self = self.to(device)
-
-        if model_type == Constants.FORGE_PRE_TRAINED:
-            self.has_integral_gap_head = False
-            self.has_variable_proba_head = False
-        elif model_type == Constants.FORGE_FINE_TUNED_INTEGRAL_GAP:
-            # TODO in the paper code forge-original, this was set to True, verify which is correct !! IMPORTANT!!
-            self.has_integral_gap_head = True
-            self.has_variable_proba_head = False
-        elif model_type == Constants.FORGE_FINE_TUNED_VARIABLE_PROBA:
-            self.has_integral_gap_head = False
-            self.has_variable_proba_head = True
-
-        self.load_state_dict(torch.load(input_forge_pkl, map_location=device))
-        self.is_trained = True
-
     def _pretrain(self,
                   input_mipinfo_list: List[MIPInfo],
                   output_forge_pkl: str,
                   output_log_file: Optional[str],
-                  train_epochs: Optional[int] = None,
+                  epochs: Optional[int] = None,
                   steps_per_instance: Optional[int] = None,
                   learning_rate: Optional[float] = None,
                   max_dgl_nodes: Optional[int] = None) -> None:
@@ -444,7 +445,7 @@ class Forge(nn.Module):
                 Path to save the model `state_dict` after each epoch.
             output_log_file : Optional[str]
                 Optional path to append training logs; if `None`, logs are not written to disk.
-            train_epochs : Optional[int], default=None
+            epochs : Optional[int], default=None
                 Number of outer training epochs; if `None`, uses the config default.
             steps_per_instance : Optional[int], default=None
                 Number of optimization steps to run per instance; if `None`, uses the config default.
@@ -466,7 +467,7 @@ class Forge(nn.Module):
         self.to(self.device)
 
         # Default to config values, but overwrite if a value is given
-        train_epochs = overwrite_if_given(self.train_epochs, train_epochs)
+        epochs = overwrite_if_given(self.epochs, epochs)
         steps_per_instance = overwrite_if_given(self.steps_per_instance, steps_per_instance)
         learning_rate = overwrite_if_given(self.learning_rate, learning_rate)
         max_dgl_nodes = overwrite_if_given(self.max_dgl_nodes, max_dgl_nodes)
@@ -478,7 +479,7 @@ class Forge(nn.Module):
 
         # Loop through data set
         t = ""
-        for epoch in range(train_epochs):
+        for epoch in range(epochs):
 
             # Alternate between prioritizing node feature reconstruction and edge reconstruction
             if epoch % 2 == 0:
@@ -496,18 +497,23 @@ class Forge(nn.Module):
             # TODO why is this starting from idx 10?
             for idx in range(10, len(input_mipinfo_list)):
 
-                dgl_graph, features, num_cons, num_vars = input_mipinfo_list[idx]
+                mip_info = input_mipinfo_list[idx]
 
                 # Some MIP instances are too large to fit in GPU memory
-                if dgl_graph.num_nodes() > max_dgl_nodes:
+                if mip_info.dgl_graph.num_nodes() > max_dgl_nodes:
                     skip_list.add(idx)
                     continue
 
+                # Push to device before the for-loop below
+                dgl_graph = mip_info.dgl_graph.to(self.device)
+                features = mip_info.feature_tensor.to(self.device)
+
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(dgl_graph.to(self.device),
-                                                                              features.to(self.device),
-                                                                              num_cons, num_vars)
+                    h_list, logits, loss, distances, codebook_ = self.forward(dgl_graph,
+                                                                              features,
+                                                                              mip_info.num_cons,
+                                                                              mip_info.num_vars)
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
@@ -539,8 +545,8 @@ class Forge(nn.Module):
                 with open(output_log_file, 'a') as file:
                     file.write(t)
 
-            # Set Forge as trained
-            self.is_trained = True
+        # Set Forge as trained
+        self.is_trained = True
 
     def _mip_model_to_embeddings(self, mip_model: gp.Model) -> MIPEmbeddings:
         """
@@ -607,6 +613,115 @@ class Forge(nn.Module):
                                        embedding_of_variable=embedding_of_variable)
 
         return mip_embeddings
+
+    def _finetune_integral_gap(self,
+                               input_mip_to_gapinfo: Dict[str, GapInfo],
+                               output_forge_finetuned_pkl : str,
+                               epochs: Optional[int] = None, #10
+                               steps_per_instance: Optional[int] = None, #10
+                               learning_rate: Optional[float] = None, #1e-4
+                               max_dgl_nodes: Optional[int] = None #30000
+                               ) -> None:
+
+        # TODO in pretraining() we have these --needed here?
+        # super().train()
+        # self.to(self.device)
+
+        # TODO comment on this block for why was this needed? Removing now?
+        # copy_params(old_model=pre_trained, new_model=self)
+        # del pre_trained
+
+        # TODO comment on this block for why was this needed?
+        torch.cuda.empty_cache()
+
+        self.train()
+
+        # Note: weight decay is set to 5e-4 as opposed to 1e-4 in pretraining TODO: why? typo? intentional? comment?
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=5e-4)
+
+        # Start Gurobi environment
+        gurobi_env = MIPProcessor._start_gurobi_env()
+
+        # Mip instances
+        mips = list(input_mip_to_gapinfo.keys())
+        for epoch in range(epochs):
+
+            epoch_loss = []
+            bce_epoch_loss = []
+            gap_epoch_loss = []
+
+            for idx, mip in enumerate(mips):
+
+                # Read MIP file to a Gurobi model
+                mip_model = gp.read(mip, env=gurobi_env)
+
+                # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
+                mip_info = self._mip_model_to_mip_info(mip_model)
+
+                # Some instances are too big to fit in the GPU (max_dgl_nodes=30000)
+                if mip_info.dgl_graph.num_nodes() <= max_dgl_nodes:
+
+                    # Push to device before the for-loop below
+                    dgl_graph = mip_info.dgl_graph.to(self.device)
+                    features = mip_info.feature_tensor.to(self.device)
+
+                    for step in range(steps_per_instance):
+
+                        # TODO we did not have this in pretraining() --needed here? comment
+                        optimizer.zero_grad()
+
+                        # Compute loss and prediction
+                        h_list, logits, loss, distances, codebook_ = self.forward(dgl_graph,
+                                                                                  features,
+                                                                                  mip_info.num_cons,
+                                                                                  mip_info.num_vars)
+                        # Predict gap ratio
+                        # TODO what's the magic -1? (layer?)
+                        gap_ratio_pred = torch.mean(h_list[-1][mip_info.num_cons:, :])
+                        gap_ratio_true = input_mip_to_gapinfo[mip].ratio
+
+                        # TODO comment here
+                        if gap_ratio_true > 1:
+                            gap_ratio_true = 1 / gap_ratio_true
+
+                        # TODO why are we predicting both gap ratio and variable probabilities here?
+                        # TODO what's the magic -2? (layer?)
+                        # Predict variable probabilities
+                        var_proba_pred = h_list[-2][mip_info.num_cons:, :]
+                        var_proba_truth = torch.Tensor(input_mip_to_gapinfo[mip].mip_sol).to(self.device)
+
+                        try:
+                            gap_loss = torch.abs(gap_ratio_pred - gap_ratio_true)
+                            bce_loss = F.binary_cross_entropy(var_proba_pred.flatten(), var_proba_truth.flatten())
+
+                            # TODO comment on weighting here?
+                            loss = gap_loss + (0.01 * bce_loss)
+                            loss.backward()
+                            optimizer.step()
+
+                            print('', '(', idx, '/', len(mips), ') |', mip,
+                                  ' | GAP Loss :', gap_loss.item(),
+                                  'BCE Loss :', bce_loss.item(), end='\r')
+
+                            epoch_loss.append(loss.item())
+                            bce_epoch_loss.append(bce_loss.item())
+                            gap_epoch_loss.append(gap_loss.item())
+                        except:
+                            continue
+
+            print("\nEpoch ", epoch + 1,
+                  "| Means | Loss : ", np.mean(epoch_loss),
+                  "| Gap Loss : ", np.mean(gap_epoch_loss),
+                  "| BCE Loss : ", np.mean(bce_epoch_loss))
+            print()
+
+            torch.save(self.state_dict(), output_forge_finetuned_pkl)
+
+            # Shuffle MIP instances for next epoch
+            np.random.shuffle(mips)
+
+        # Close Gurobi environment
+        gurobi_env.close()
 
     @staticmethod
     def _validate_args(train_config_file_path) -> None:

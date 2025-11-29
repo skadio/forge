@@ -17,17 +17,21 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "category-encoders",
     "dgl",
     "gurobipy",
-    "marimo[recommended]",
     "numpy",
-    "ogb",
     "pandas",
     "scikit-learn",
     "scipy",
     "torch",
-    "pyyaml"
+    "pyyaml",
+    # VQ dependencies
+    "category-encoders",
+    "einops",
+    "googledrivedownloader",
+    "ogb",
+    # Other
+    "marimo[recommended]"
 ]
 dynamic = ["version"]
 

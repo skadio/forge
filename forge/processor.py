@@ -169,21 +169,15 @@ class MIPProcessor:
         # Find and sort MIP instance files by size
         sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=True)
 
-        # Setup Gurobi environment
-        try:
-            from gurobi_onboarder import init_gurobi
-            gurobi_venv, GUROBI_FOUND = init_gurobi.initialize_gurobi()
-        except:
-            gurobi_venv = gp.Env(empty=True)
-        gurobi_venv.setParam("OutputFlag", 0)
-        gurobi_venv.start()
+        # Start Gurobi environment
+        gurobi_env = MIPProcessor._start_gurobi_env()
 
         # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_mip_files))):
 
             # Read MIP file to a Gurobi model
-            mip_model = gp.read(sorted_mip_files[idx], env=gurobi_venv)
+            mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
 
             # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
             mip_info = self._mip_model_to_mip_info(mip_model)
@@ -191,10 +185,14 @@ class MIPProcessor:
             mip_to_mipinfo[mip_info.instance_name] = mip_info
 
             if relaxation_list:
+                cons = mip_model.getConstrs()
+
                 for ratio in relaxation_list:
-                    # Randomly remove a given ratio of constraints to create a new MIP instance
-                    cons = mip_model.getConstrs()
+
+                    # Choose a random subset of constraints
                     cons_remove_ = self.rng.choice(cons, int(len(cons) * ratio), replace=False)
+
+                    # Remove them from the model
                     for c in cons_remove_:
                         mip_model.remove(c)
                     mip_model.update()
@@ -214,6 +212,12 @@ class MIPProcessor:
                     for c in cons_remove_:
                         mip_model.addConstrs(c)
                     mip_model.update()
+
+            # Release Gurobi model resources
+            mip_model.dispose()
+
+        # Close Gurobi environment
+        gurobi_env.close()
 
         save_pickle(mip_to_mipinfo, output_mip_to_mipinfo_pkl)
 
@@ -428,3 +432,22 @@ class MIPProcessor:
             mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
 
         return mip_filepaths
+
+    @staticmethod
+    def _start_gurobi_env():
+        """
+        Initialize, start and return a Gurobi environment with output disabled.
+
+        Returns
+        -------
+        gp.Env
+            Configured Gurobi environment.
+        """
+        try:
+            from gurobi_onboarder import init_gurobi
+            gurobi_env, GUROBI_FOUND = init_gurobi.initialize_gurobi()
+        except Exception:
+            gurobi_env = gp.Env(empty=True)
+        gurobi_env.setParam("OutputFlag", 0)
+        gurobi_env.start()
+        return gurobi_env

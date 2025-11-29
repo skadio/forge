@@ -15,9 +15,9 @@ class Constants(NamedTuple):
     """
 
     # Forge Model Types
-    FORGE_PRE_TRAINED = "forge_pretrained"
-    FORGE_FINE_TUNED_INTEGRAL_GAP = "forge_fine_tuned_integral_gap"
-    FORGE_FINE_TUNED_VARIABLE_PROBA = "forge_fine_tuned_variable_proba"
+    FORGE_PRE_TRAIN = "forge_pretrain"
+    FORGE_FINE_TUNE_INTEGRAL_GAP = "forge_fine_tune_integral_gap"
+    FORGE_FINE_TUNE_VARIABLE_PROBA = "forge_fine_tune_variable_proba"
 
     # Names
     _DATA_DIR_NAME = "data"
@@ -103,4 +103,10 @@ def save_pickle(obj, pickle_file) -> None:
     with open(pickle_file, 'wb') as fp:
         pickle.dump(obj, fp)
 
+def copy_params(old_model, new_model):
+    small_state_dict = old_model.state_dict()
+    large_state_dict = new_model.state_dict()
 
+    for name, param in small_state_dict.items():
+        if name in large_state_dict:
+            large_state_dict[name].copy_(param)
