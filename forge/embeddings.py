@@ -2,6 +2,7 @@ import time
 from typing import List, Callable, Optional, Tuple, Union
 
 import dgl
+import gurobipy as gp
 import numpy as np
 import torch
 import torch.nn as nn
@@ -9,10 +10,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import yaml
 from dgl.nn import SAGEConv
+from torch.fx.experimental.unification import variables
 
-from forge.processor import MIPInfo
+from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given
-
 # TODO consider changing with the other library to remove the code copy to a fix/static version
 from vqgraph.vq import VectorQuantize
 
@@ -397,14 +398,36 @@ class Forge(nn.Module):
 
         return h_list, h, loss, dist, codebook
 
-    def pretrain(self,
-                 input_mipinfo_list: List[MIPInfo],
-                 output_forge_pkl: str,
-                 output_log_file: Optional[str],
-                 train_epochs: Optional[int] = None,
-                 steps_per_instance: Optional[int] = None,
-                 learning_rate: Optional[float] = None,
-                 max_dgl_nodes: Optional[int] = None) -> None:
+    def load_model(self, input_forge_pkl, model_type=Constants.FORGE_PRE_TRAINED):
+
+        if self.is_trained:
+            pass
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self = self.to(device)
+
+        if model_type == Constants.FORGE_PRE_TRAINED:
+            self.has_integral_gap_head = False
+            self.has_variable_proba_head = False
+        elif model_type == Constants.FORGE_FINE_TUNED_INTEGRAL_GAP:
+            # TODO in the paper code forge-original, this was set to True, verify which is correct !! IMPORTANT!!
+            self.has_integral_gap_head = True
+            self.has_variable_proba_head = False
+        elif model_type == Constants.FORGE_FINE_TUNED_VARIABLE_PROBA:
+            self.has_integral_gap_head = False
+            self.has_variable_proba_head = True
+
+        self.load_state_dict(torch.load(input_forge_pkl, map_location=device))
+        self.is_trained = True
+
+    def _pretrain(self,
+                  input_mipinfo_list: List[MIPInfo],
+                  output_forge_pkl: str,
+                  output_log_file: Optional[str],
+                  train_epochs: Optional[int] = None,
+                  steps_per_instance: Optional[int] = None,
+                  learning_rate: Optional[float] = None,
+                  max_dgl_nodes: Optional[int] = None) -> None:
         """Pretrain the Forge model on provided MIP instances. Sets `is_trained` to True upon completion.
 
             Parameters
@@ -448,6 +471,7 @@ class Forge(nn.Module):
         learning_rate = overwrite_if_given(self.learning_rate, learning_rate)
         max_dgl_nodes = overwrite_if_given(self.max_dgl_nodes, max_dgl_nodes)
 
+        # TODO this main loss list is never used/printed/logged?
         main_loss_list = []
         skip_list = set()
         optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -517,6 +541,72 @@ class Forge(nn.Module):
 
             # Set Forge as trained
             self.is_trained = True
+
+    def _mip_model_to_embeddings(self, mip_model: gp.Model) -> MIPEmbeddings:
+        """
+        Convert a provided Gurobi model into a codebook histogram and
+        return per-node embeddings for constraints and variables.
+
+        Parameters
+        ----------
+        mip_model : gurobipy.Model
+            An already-loaded Gurobi model object.
+
+        Returns
+        -------
+        MIPEmbeddings
+            Dataclass containing:
+            - mip_embedding: 1D numpy array of length `self.codebook_size` with counts of assigned codes
+            - embedding_of_constraint: torch.Tensor of shape (num_cons, hidden_dim)
+            - embedding_of_variable: torch.Tensor of shape (num_vars, hidden_dim)
+
+        Raises
+        ------
+        TypeError
+            If `mip_model` is not a gurobipy.Model.
+        """
+        # Validate input type
+        if not isinstance(mip_model, gp.Model):
+            raise TypeError(f"Error: mip_model must be a gurobipy.model, got {type(mip_model).__name__}")
+
+        # If not trained, warn (keeps previous behavior)
+        if not self.is_trained:
+            print("Error: Forge is not trained and no pre-trained model path is given.")
+
+        # Ensure module is in evaluation mode and on device
+        self.eval()
+
+        # Store Forge eval mode (to restore back) and set to eval only to generate embedding
+        original_mode = self.is_eval_mode
+        self.is_eval_mode = True
+
+        # Convert MIP model to MIP info
+        mip_info = MIPProcessor._mip_model_to_mip_info(mip_model)
+
+        # Forward pass through trained Forge
+        h_list, logits, loss, distances, codebook_ = self.forward(mip_info.dgl_graph.to(self.device),
+                                                                  mip_info.feature_tensor.to(self.device),
+                                                                  mip_info.num_cons,
+                                                                  mip_info.num_vars)
+        # Restore original mode
+        self.is_eval_mode = original_mode
+
+        # Compute mip instance vector, as a frequency distribution of codes assigned to constraints and variables
+        assigned_codes = torch.argmin(distances, axis=1).detach().cpu().numpy()
+        instance_embedding = np.zeros(self.codebook_size, )
+        for c in assigned_codes:
+            instance_embedding[c] += 1
+        # TODO possible to speed up using:
+        #   instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
+
+        embedding_of_constraint = h_list[1][:mip_info.num_cons]
+        embedding_of_variable = h_list[1][mip_info.num_cons:]
+
+        mip_embeddings = MIPEmbeddings(instance_embedding=instance_embedding,
+                                       embedding_of_constraint=embedding_of_constraint,
+                                       embedding_of_variable=embedding_of_variable)
+
+        return mip_embeddings
 
     @staticmethod
     def _validate_args(train_config_file_path) -> None:

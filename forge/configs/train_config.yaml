@@ -12,12 +12,11 @@ graph_sage_aggregation: "mean"
 # Codebook Parameters
 codebook_size: 5000
 
-# Loss Weight Parameters
+# Loss Weight Parameters (not used)
 lambda_edge: 1
 lambda_node: 1
 
 # Model Configuration Flags
-has_separate_codebooks: false
 orthogonal_reg_weight: 0.0
 has_integral_gap_head: false
 has_variable_proba_head: false

@@ -34,30 +34,66 @@ class MIPInfo:
 
     Attributes
     ----------
-    instance_name : str
+    instance_name : Optional[str]
         Path or unique identifier of the MIP instance.
-    dgl_graph : Any
+    dgl_graph : Optional[dgl.DGLGraph]
         DGL graph representing the bipartite MIP constraint-variable structure.
-    feature_tensor : torch.FloatTensor
+    feature_tensor : Optional[torch.Tensor]
         Node feature tensor for the DGL graph (constraints first, then variables).
-    num_cons : int
+    num_cons : Optional[int]
         Number of constraints in the original MIP.
-    num_vars : int
+    num_vars : Optional[int]
         Number of variables in the original MIP.
     """
 
     def __init__(self,
                  instance_name: str = None,
-                 dgl_graph: Any = None,
-                 feature_tensor=None,
+                 dgl_graph: Optional[dgl.DGLGraph] = None,
+                 feature_tensor: Optional[torch.Tensor] = None,
                  num_cons: int = None,
                  num_vars: int = None):
 
-        self.instance_name = instance_name
-        self.dgl_graph = dgl_graph
-        self.feature_tensor = feature_tensor  # TODO: what's the row,column? is it num_con + num_var, feat_dim=10?
-        self.num_cons = num_cons
-        self.num_vars = num_vars
+        self.instance_name: Optional[str] = instance_name
+        self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
+        # TODO: what's the row,column of feature tensor? is it num_con + num_var, feat_dim=10?
+        self.feature_tensor: Optional[torch.Tensor] = feature_tensor
+        self.num_cons: Optional[int] = num_cons
+        self.num_vars: Optional[int] = num_vars
+
+
+class MIPEmbeddings:
+    """
+    Container for learned embeddings related to a MIP instance.
+
+    Attributes
+    ----------
+    instance_embedding : Optional[np.ndarray]
+        Global embedding for the entire MIP of size codebook_size
+    embedding_of_constraint : Optional[torch.Tensor]
+        Per-constraint embedding vector (shape: (num_constraints, codebook_dim)).
+    embedding_of_variable : Optional[torch.Tensor]
+        Per-variable embedding vector (shape: (num_variables, codebook_dim)).
+    """
+
+    def __init__(self,
+                 instance_embedding: Optional[np.ndarray] = None,
+                 embedding_of_constraint: Optional[torch.Tensor] = None,
+                 embedding_of_variable: Optional[torch.Tensor] = None) -> None:
+        """
+        Initialize a MIPEmbeddings container.
+
+        Parameters
+        ----------
+        instance_embedding : Optional[np.ndarray], default: None
+            Global MIP embedding vector.
+        embedding_of_constraint : Optional[torch.Tensor], default: None
+            Embedding vector per constraint.
+        embedding_of_variable : Optional[torch.Tensor], default: None
+            Embedding vector per variable.
+        """
+        self.instance_embedding: Optional[np.ndarray]= instance_embedding
+        self.embedding_of_constraint: Optional[torch.Tensor]= embedding_of_constraint
+        self.embedding_of_variable: Optional[torch.Tensor] = embedding_of_variable
 
 
 class MIPProcessor:
@@ -80,7 +116,7 @@ class MIPProcessor:
     """
 
     def __init__(self,
-                 train_config_file_path: Optional[str] = Constants.train_config_yaml,
+                 train_config_file_path: Optional[str] = Constants.default_train_config_yaml,
                  seed: Optional[int] = None):
 
         super().__init__()
@@ -130,10 +166,8 @@ class MIPProcessor:
         if relaxation_list is None:
             relaxation_list = []
 
-        all_files = os.listdir(input_mip_folder)
-        files_and_sizes = [os.path.join(input_mip_folder, path) for path in all_files]
-        files_and_sizes = [x for x in files_and_sizes if 'mps' in x or 'lp' in x]
-        sorted_instances = sorted(files_and_sizes, key=os.path.getsize)
+        # Find and sort MIP instance files by size
+        sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=True)
 
         # Setup Gurobi environment
         try:
@@ -146,14 +180,14 @@ class MIPProcessor:
 
         # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
-        for idx in tqdm(range(len(sorted_instances))):
+        for idx in tqdm(range(len(sorted_mip_files))):
 
             # Read MIP file to a Gurobi model
-            mip_model = gp.read(sorted_instances[idx], env=gurobi_venv)
+            mip_model = gp.read(sorted_mip_files[idx], env=gurobi_venv)
 
             # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-            mip_info = self._generate_mip_info(mip_model)
-            mip_info.instance_name = sorted_instances[idx]
+            mip_info = self._mip_model_to_mip_info(mip_model)
+            mip_info.instance_name = sorted_mip_files[idx]
             mip_to_mipinfo[mip_info.instance_name] = mip_info
 
             if relaxation_list:
@@ -166,8 +200,10 @@ class MIPProcessor:
                     mip_model.update()
 
                     # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-                    mip_info = self._generate_mip_info(mip_model)
-                    mip_info.instance_name = sorted_instances[idx] + '_relaxed_' + str(ratio)
+                    mip_info = self._mip_model_to_mip_info(mip_model)
+                    orig_path = sorted_mip_files[idx]
+                    base, ext = os.path.splitext(orig_path)
+                    mip_info.instance_name = f"{base}_relaxed_{ratio}{ext}"
                     mip_to_mipinfo[mip_info.instance_name] = mip_info
 
                     # Save the perturbed MIP instance to disk
@@ -206,7 +242,7 @@ class MIPProcessor:
         return mipinfo_list
 
     @staticmethod
-    def _generate_mip_info(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
+    def _mip_model_to_mip_info(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
         """
         Convert a Gurobi model into a MIPInfo.
 
@@ -365,3 +401,30 @@ class MIPProcessor:
 
         # Return feature tensor, number of constraints, and number of variables
         return feature_tensor, num_cons, num_vars
+
+    @staticmethod
+    def get_only_mip_files(input_mip_folder: str, is_sort_by_size:bool = False) -> List[str]:
+        """
+        Find MIP instance files in a directory and return them sorted by file size.
+
+        Parameters
+        ----------
+        input_mip_folder : str
+            Path to the directory containing MIP instance files.
+        is_sort_by_size : bool
+            If True, sorts the returned file paths by file size in ascending order.
+
+        Returns
+        -------
+        List[str]
+            Absolute paths to files with extensions `.mps` or `.lp`, optionally sorted by file size (ascending).
+        """
+
+        all_filenames = os.listdir(input_mip_folder)
+        all_filepaths = [os.path.join(input_mip_folder, filename) for filename in all_filenames]
+        mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or p.lower().endswith('.lp')]
+
+        if is_sort_by_size:
+            mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
+
+        return mip_filepaths

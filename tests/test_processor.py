@@ -6,6 +6,7 @@ from forge.utils import Constants
 class ProcessorTest(BaseTest):
 
     def test_processor(self):
+
         # MIP Processor
         mip_processor = MIPProcessor()
 

@@ -1,16 +1,16 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
 Forge is a research library designed for representational learning in combinatorial problems. 
 
-## Quick Start - Pretraining Pipeline
+## Quick Start - Pre-Training Pipeline
 ```python
 from forge.embeddings import Forge
 from forge.pipeline import pretrain
 
-# Forge model
-forge = Forge(train_config_yaml="forge/configs/train_config.yaml")
+# Forge model with its pre-training configuration
+forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
 
 # Pretrain forge
-pretrain(forge,
+pretrain(forge=forge,
          input_mip_folder="/data/train/", 
          relaxation_list=[0.05, 0.01],
          output_mip_to_mipinfo_pkl="/models/mip_to_mipinfo.pkl",
@@ -18,10 +18,38 @@ pretrain(forge,
          output_log_file="/models/forge_pretrained.log")
 ```
 
-## Quick Start - Pretraining Script
+## Quick Start - Pre-Training Script
 ```bash
 cd forge
 python -m forge.scripts.pretrain --train_config_yaml `/forge/configs/train_config.yaml` --input_mip_folder `/data/train/` --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl `/models/mip_to_mipinfo.pkl` --output_forge_pkl `/models/forge_pretrained.pkl` --output_log_file `/models/forge_pretrained.log`
+```
+
+## Quick Start - MIP Embeddings Pipeline
+```python
+from forge.embeddings import Forge
+from forge.pipeline import mip_to_embeddings
+
+# Forge model with its pre-trained configuration
+forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
+
+# Load pre-trained model
+forge.load_model(input_forge_pkl="/models/forge_pretrained.pkl")
+
+# Generate embeddings dictionary for MIPs in the input folder
+# Each MIP instance is mapped to a MIPEmbeddings object, Dict[str, MIPEmbeddings], containing: 
+#   - instance_embedding: np.ndarray (codebook_size)
+#   - embeddings_of_constraint[c]: torch.Tensor(num_constraints, codebook_dim)
+#   - embeddings_of_variable[v]: torch.Tensor(num_constraints, codebook_dim) 
+mip_to_embeddings_dict = mip_to_embeddings(forge=forge,
+                                           input_mips="/data/test/",
+                                           output_mip_to_embeddings_pkl="/models/mip_to_embeddings.pkl")
+
+```
+
+## Quick Start - MIP Embeddings Script
+```bash
+cd forge
+python -m forge.scripts.mip_to_embeddings --train_config_yaml `/forge/configs/train_config.yaml` --input_mips `/data/test/` --output_mip_to_embeddings_pkl `/models/mip_to_embeddings.pkl`
 ```
 
 ## Installation

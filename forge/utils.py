@@ -14,6 +14,11 @@ class Constants(NamedTuple):
     Constant values used by the modules.
     """
 
+    # Forge Model Types
+    FORGE_PRE_TRAINED = "forge_pretrained"
+    FORGE_FINE_TUNED_INTEGRAL_GAP = "forge_fine_tuned_integral_gap"
+    FORGE_FINE_TUNED_VARIABLE_PROBA = "forge_fine_tuned_variable_proba"
+
     # Names
     _DATA_DIR_NAME = "data"
     _FORGE_DIR_NAME = "forge"
