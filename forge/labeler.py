@@ -21,7 +21,7 @@ class MIPLabeler:
     @staticmethod
     def get_mip_to_integral_gap(input_mip_folder,
                                 output_mip_to_gapinfo_pkl,
-                                time_limit: int = 120,
+                                gapinfo_time_limit: int = 120,
                                 has_return=False) -> Dict[str, GapInfo]:
 
         mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=False)
@@ -33,7 +33,7 @@ class MIPLabeler:
         for idx, mip_file in enumerate(mip_files):
 
             # Set time limit
-            gurobi_env.setParam("TimeLimit", time_limit)
+            gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
 
             # Create mip model
             mip_model = gp.read(mip_file, env=gurobi_env)

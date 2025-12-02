@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='/models/mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
     parser.add_argument('--model_type', type=str, default=Constants.FORGE_PRE_TRAIN,
-                        help=('Model type constant to use when loading the Forge model. '
+                        help=('Model type to use when loading the Forge model. '
                               'Available options: ' + ', '.join([Constants.FORGE_PRE_TRAIN,
                                                                  Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                                                  Constants.FORGE_FINE_TUNE_VARIABLE_PROBA])))

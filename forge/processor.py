@@ -451,3 +451,24 @@ class MIPProcessor:
         gurobi_env.setParam("OutputFlag", 0)
         gurobi_env.start()
         return gurobi_env
+
+    @staticmethod
+    def get_mip_items(input_mips):
+        """
+        Normalize input: accept a folder path, a single MIP file path, a list of paths,
+        or a gurobipy Model instance (or list/mix of them).
+        Returns a list of MIP items (file paths or gp.Model instances).
+        """
+        inputs = input_mips if isinstance(input_mips, (list, tuple)) else [input_mips]
+        mip_items = []
+        for item in inputs:
+            if isinstance(item, gp.Model):
+                mip_items.append(item)
+            elif isinstance(item, str) and os.path.isdir(item):
+                mip_items.extend(MIPProcessor.get_only_mip_files(item, is_sort_by_size=False))
+            elif isinstance(item, str) and os.path.isfile(item):
+                mip_items.append(item)
+            else:
+                raise ValueError(
+                    f"Error: Input {item!r} is neither a directory, a file, nor a gurobipy model instance.")
+        return mip_items

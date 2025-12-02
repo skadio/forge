@@ -16,8 +16,6 @@ lambda_node: 1
 
 # Model Configuration Flags
 orthogonal_reg_weight: 0.0
-has_integral_gap_head: false
-has_variable_proba_head: false
 is_eval_mode: false
 
 # Decoder Parameters
@@ -32,5 +30,5 @@ vq_is_cosine_sim: true
 epochs: 10
 steps_per_instance: 10
 learning_rate: 1e-4
-weight_decay: 1e-5
+weight_decay: 1e-4
 max_dgl_nodes: 2100

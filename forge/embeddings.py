@@ -139,15 +139,6 @@ class Forge(nn.Module):
             Returns
             -------
             None
-
-            Example
-            -------
-            # TODO test this example (add to tests)
-            >> > from forge.embeddings import Forge
-            >> > forge = Forge()
-            >> > forge.pretrain(model_save_path="forge_pretrained.pth",
-            ...                 train_list=my_mip_graph_dataset,
-            ...                 log_path="training_log.txt")
         """
 
         super().__init__()
@@ -248,8 +239,8 @@ class Forge(nn.Module):
     def load_model(self, input_forge_pkl, model_type=Constants.FORGE_PRE_TRAIN):
 
         if self.is_trained:
-            print("Warning: Forge model is already trained, NOT loading weights!!")
-            pass
+            print("Warning: Forge model is already trained, NOT loading weights, quitting!!")
+            return
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self = self.to(device)
@@ -428,6 +419,7 @@ class Forge(nn.Module):
                   epochs: Optional[int] = None,
                   steps_per_instance: Optional[int] = None,
                   learning_rate: Optional[float] = None,
+                  weight_decay: Optional[float] = None,
                   max_dgl_nodes: Optional[int] = None) -> None:
         """Pretrain the Forge model on provided MIP instances. Sets `is_trained` to True upon completion.
 
@@ -451,6 +443,8 @@ class Forge(nn.Module):
                 Number of optimization steps to run per instance; if `None`, uses the config default.
             learning_rate : Optional[float], default=None
                 Learning rate override for the optimizer; if `None`, uses the config default.
+            weight_decay : Optional[float], default=None
+                Weight decay for the optimizer; if `None`, uses the config default.
             max_dgl_nodes : Optional[int], default=None
                 Maximum allowed number of nodes for a DGL graph to be processed on the device.
                 Instances with `dgl_graph.num_nodes()` greater than this value will be skipped during training.
@@ -470,12 +464,13 @@ class Forge(nn.Module):
         epochs = overwrite_if_given(self.epochs, epochs)
         steps_per_instance = overwrite_if_given(self.steps_per_instance, steps_per_instance)
         learning_rate = overwrite_if_given(self.learning_rate, learning_rate)
+        weight_decay = overwrite_if_given(self.weight_decay, weight_decay)
         max_dgl_nodes = overwrite_if_given(self.max_dgl_nodes, max_dgl_nodes)
 
         # TODO this main loss list is never used/printed/logged?
         main_loss_list = []
         skip_list = set()
-        optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=1e-4)
+        optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
         # Loop through data set
         t = ""
@@ -577,7 +572,7 @@ class Forge(nn.Module):
 
         # If not trained, warn (keeps previous behavior)
         if not self.is_trained:
-            print("Error: Forge is not trained and no pre-trained model path is given.")
+            raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
 
         # Ensure module is in evaluation mode and on device
         self.eval()
@@ -586,7 +581,7 @@ class Forge(nn.Module):
         original_mode = self.is_eval_mode
         self.is_eval_mode = True
 
-        # Convert MIP model to MIP info
+        # Convert MIP model to MIP info with DGL graph, features tensor, num cons/vars
         mip_info = MIPProcessor._mip_model_to_mip_info(mip_model)
 
         # Forward pass through trained Forge
@@ -620,6 +615,7 @@ class Forge(nn.Module):
                                epochs: Optional[int] = None, #10
                                steps_per_instance: Optional[int] = None, #10
                                learning_rate: Optional[float] = None, #1e-4
+                               weight_decay: Optional[float] = None, #5e-4
                                max_dgl_nodes: Optional[int] = None #30000
                                ) -> None:
 
@@ -636,8 +632,8 @@ class Forge(nn.Module):
 
         self.train()
 
-        # Note: weight decay is set to 5e-4 as opposed to 1e-4 in pretraining TODO: why? typo? intentional? comment?
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=5e-4)
+        # TODO: weight decay is set to 5e-4 for fine-tuning vs. 1e-4 in pretraining typo? intentional?
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
         # Start Gurobi environment
         gurobi_env = MIPProcessor._start_gurobi_env()
@@ -722,6 +718,83 @@ class Forge(nn.Module):
 
         # Close Gurobi environment
         gurobi_env.close()
+
+    def _mip_model_to_gap_info(self, mip_model: gp.Model, problem_type:str) -> GapInfo:
+        """
+        Convert a provided Gurobi model into a codebook histogram and
+        return per-node embeddings for constraints and variables.
+
+        Parameters
+        ----------
+        mip_model : gurobipy.Model
+            An already-loaded Gurobi model object.
+
+        Returns
+        -------
+
+        Raises
+        ------
+        TypeError
+            If `mip_model` is not a gurobipy.Model.
+        """
+        # Validate input type
+        if not isinstance(mip_model, gp.Model):
+            raise TypeError(f"Error: mip_model must be a gurobipy.model, got {type(mip_model).__name__}")
+
+        # If not trained, warn (keeps previous behavior)
+        if not self.is_trained:
+            raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
+
+        # Ensure module is in evaluation mode and on device
+        # TODO this is used in get mip_embeddings but not get primal gap? is it not needed?
+        #self.eval()
+
+        # Store Forge eval mode (to restore back) and set to eval only to generate embedding
+        original_mode = self.is_eval_mode
+        self.is_eval_mode = True
+
+        # Convert MIP model to MIP info with DGL graph, features tensor, num cons/vars
+        mip_info = MIPProcessor._mip_model_to_mip_info(mip_model)
+
+        # Forward pass through trained Forge
+        h_list, logits, loss, distances, codebook_ = self.forward(mip_info.dgl_graph.to(self.device),
+                                                                  mip_info.feature_tensor.to(self.device),
+                                                                  mip_info.num_cons,
+                                                                  mip_info.num_vars)
+        # Restore original mode
+        self.is_eval_mode = original_mode
+
+        # Find LP optimal to calculate ratio
+        variable_proba = h_list[-2][mip_info.num_cons:]
+        integral_gap = h_list[-1][mip_info.num_cons:]
+
+        # TODO what's this exactly? is this the predicted gap ratio?
+        gap_ratio = torch.mean(integral_gap).item()
+
+        # Read and solve the LP relaxation to generate initial objective value
+        lp_model = mip_model.relax()
+        lp_model.optimize()
+        lp_obj = lp_model.ObjVal
+
+        # TODO consider generalizing/removing in future
+        # Add a buffer to the ratio to make sure we are not infeasible
+        mip_obj = lp_obj
+        if problem_type in ['SC']:
+            gap_ratio += (0.02 * gap_ratio)
+            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
+        elif problem_type in ['MVC']:
+            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
+        elif problem_type in ['GISP']:
+            gap_ratio += (0.2 * gap_ratio)
+            mip_obj = lp_obj * gap_ratio
+        elif problem_type in ['CA']:
+            gap_ratio += (0.05 * gap_ratio)
+            mip_obj =lp_obj * gap_ratio
+
+        # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
+        gap_info = GapInfo(ratio=gap_ratio, mip_sol=None, mip_obj=mip_obj, lp_obj=lp_obj)
+
+        return gap_info
 
     @staticmethod
     def _validate_args(train_config_file_path) -> None:

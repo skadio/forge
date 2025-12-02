@@ -27,9 +27,14 @@ if __name__ == "__main__":
                         help='Number of training steps per MIP instance per epoch')
     parser.add_argument('--learning_rate', type=float, default=1e-4,
                         help='Learning rate for the optimizer')
+    # TODO default weight decay for pretraining is 1e-4 and here it is 5e-4, it's different, yes?
+    parser.add_argument('--weight_decay', type=float, default=5e-4,
+                        help='Weight decay for the optimizer')
     # TODO default max nodes for pretraining is 2100 and here it is 30000, very different, no?
     parser.add_argument('--max_dgl_nodes', type=int, default=30000,
                         help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
+    parser.add_argument('--gapinfo_time_limit', type=int, default=120,
+                        help='Time limit in seconds for computing integral gap info (default: 120)')
     args = parser.parse_args()
 
     # Forge model ready for fine-tuning
@@ -43,7 +48,10 @@ if __name__ == "__main__":
                           input_mip_folder=args.input_mip_folder,
                           output_forge_finetuned_pkl=args.output_forge_finetuned,
                           output_mip_to_gapinfo_pkl=args.output_mip_to_gapinfo_pkl,
+                          input_mip_to_gapinfo_pkl=args.input_mip_to_gapinfo_pkl,
                           epochs=args.epochs,
                           steps_per_instance=args.steps_per_instance,
                           learning_rate=args.learning_rate,
-                          max_dgl_nodes=args.max_dgl_nodes)
+                          weight_decay=args.weight_decay,
+                          max_dgl_nodes=args.max_dgl_nodes,
+                          gapinfo_time_limit=args.gapinfo_time_limit)

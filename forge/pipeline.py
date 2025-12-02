@@ -4,9 +4,9 @@ from typing import Union, List, Sequence, Dict, Any, Optional
 import gurobipy as gp
 
 from forge.embeddings import Forge
-from forge.processor import MIPProcessor
+from forge.processor import MIPProcessor, MIPEmbeddings
 from forge.utils import check_true, save_pickle, load_pickle
-from forge.labeler import MIPLabeler
+from forge.labeler import MIPLabeler, GapInfo
 
 
 def finetune_integral_gap(forge: Forge,
@@ -17,7 +17,9 @@ def finetune_integral_gap(forge: Forge,
                           epochs: Optional[int] = None,
                           steps_per_instance: Optional[int] = None,
                           learning_rate: Optional[float] = None,
-                          max_dgl_nodes: Optional[int] = None) -> None:
+                          weight_decay: Optional[float] = None,
+                          max_dgl_nodes: Optional[int] = None,
+                          gapinfo_time_limit: int = 120) -> None:
     """Fine-tune a pre-trained Forge model for integrality gap prediction from a folder of MIP files.
 
     Parameters
@@ -39,8 +41,12 @@ def finetune_integral_gap(forge: Forge,
         Number of steps per instance for fine-tuning.
     learning_rate : Optional[float], default=None
         Learning rate for fine-tuning.
+    weight_decay : Optional[float], default=None
+        Weight decay for fine-tuning.
     max_dgl_nodes : Optional[int], default=None
         Maximum number of DGL nodes allowed.
+    gapinfo_time_limit : int, default=120
+        Time limit (in seconds) for computing gap information for each MIP instance.
 
     Returns
     -------
@@ -68,7 +74,7 @@ def finetune_integral_gap(forge: Forge,
         labeler = MIPLabeler()
         mip_to_gapinfo = labeler.get_mip_to_integral_gap(input_mip_folder=input_mip_folder,
                                                          output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
-                                                         time_limit=120,
+                                                         gapinfo_time_limit=gapinfo_time_limit,
                                                          has_return=True)
 
     # Fine-tune the Forge model
@@ -77,6 +83,7 @@ def finetune_integral_gap(forge: Forge,
                                  epochs=epochs,
                                  steps_per_instance=steps_per_instance,
                                  learning_rate=learning_rate,
+                                 weight_decay=weight_decay,
                                  max_dgl_nodes=max_dgl_nodes)
 
 
@@ -90,6 +97,7 @@ def pretrain(forge: Forge,
              epochs: Optional[int] = None,
              steps_per_instance: Optional[int] = None,
              learning_rate: Optional[float] = None,
+             weight_decay: Optional[float] = None,
              max_dgl_nodes: Optional[int] = None) -> None:
     """Pre-train a Forge model.
 
@@ -122,6 +130,8 @@ def pretrain(forge: Forge,
         from `forge` or the training pipeline will be used.
     learning_rate : Optional[float], optional
         Learning rate for the optimizer. If `None`, the learning rate defined in `forge` will be used.
+    weight_decay : Optional[float], optional
+        Weight decay for the optimizer. If `None`, the weight decay defined in `forge`
     max_dgl_nodes : Optional[int], optional
         Maximum number of graph nodes when converting MIP instances to DGL graphs. If `None`, no
         additional node cap is applied beyond defaults in the conversion utilities.
@@ -166,11 +176,12 @@ def pretrain(forge: Forge,
                     epochs=epochs,
                     steps_per_instance=steps_per_instance,
                     learning_rate=learning_rate,
+                    weight_decay=weight_decay,
                     max_dgl_nodes=max_dgl_nodes)
 
 
 def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
-                      output_mip_to_embeddings_pkl: str) -> Dict[str, Any]:
+                      output_mip_to_embeddings_pkl: str) -> Dict[str, MIPEmbeddings]:
     """
     Generate embeddings for one or more MIP inputs using a trained Forge instance.
 
@@ -189,7 +200,7 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
 
     Returns
     -------
-    Dict[str, Any]
+    Dict[str, MIPEmbeddings]
         Mapping from MIP identifier (file path or model name) to embeddings object.
 
     Raises
@@ -200,24 +211,12 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
-    # or a gurobipy Model instance (or list/mix of them).
-    inputs = input_mips if isinstance(input_mips, (list, tuple)) else [input_mips]
-
-    # MIP items can be a file, folder, or gurobipy model
-    mip_items = []
-    for item in inputs:
-        if isinstance(item, gp.Model):
-            mip_items.append(item)
-        elif isinstance(item, str) and os.path.isdir(item):
-            mip_items.extend(MIPProcessor.get_only_mip_files(item, is_sort_by_size=False))
-        elif isinstance(item, str) and os.path.isfile(item):
-            mip_items.append(item)
-        else:
-            raise ValueError(f"Error: Input {item!r} is neither a directory, a file, nor a gurobipy model instance.")
+    mip_items = MIPProcessor.get_mip_items(input_mips)
 
     # Start Gurobi environment
     gurobi_env = MIPProcessor._start_gurobi_env()
 
+    # For each MIP item, create MIP model, and generate embedding
     mip_to_embeddings = {}
     for mip_item in mip_items:
 
@@ -241,17 +240,74 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
     return mip_to_embeddings
 
 
+def mip_to_gap_info(forge: Forge,
+                    input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]], mip_to_gap_info_pkl: str,
+                    problem_type: str) -> Dict[str, GapInfo]:
+    """
+    Generate gap information for one or more MIP inputs using a trained Forge instance.
+
+    Parameters
+    ----------
+    forge : Forge
+        A trained Forge instance.
+    input_mips : str | gp.Model | Sequence[str | gp.Model]
+        Path to a directory containing MIP files,
+        Path to a single MIP file,
+        A single gurobipy model instance,
+        Or a list/tuple mixing these types.
+    mip_to_gap_info_pkl : str
+        Filepath where the resulting mapping from MIP identifiers to gap information will be saved (pickle).
+    problem_type : str
+        The type of problem for which gap information is to be computed.
+
+    Returns
+    -------
+    Dict[str, GapInfo]
+        Mapping from MIP identifier (file path or model name) to gap information object.
+        GapInfo.ratio is the predicted ratio without solving the MIP
+        GapInfo.mip_sol is None with no solution computed
+        GapInfo.mip_obj is the predicted objective without solving the MIP
+        GapInfo.lp_obj is the true lp objective
+    Raises
+    ------
+    ValueError
+        If any element of `input_mips` is not a supported type.
+    """
+
+    _validate_forge(forge, check_trained=True)
+
+    # Normalize input: accept a folder path, a single MIP file path, a list of paths,
+    mip_items = MIPProcessor.get_mip_items(input_mips)
+
+    # Start Gurobi environment
+    gurobi_env = MIPProcessor._start_gurobi_env()
+
+    # For each MIP item, create MIP model, and generate embedding
+    mip_to_gap_info = {}
+    for mip_item in mip_items:
+
+        # Read MIP file to a Gurobi model (or use the provided model)
+        if isinstance(mip_item, gp.Model):
+            mip_model = mip_item
+            key = getattr(mip_model, "ModelName", "gurobi_model")
+        else:
+            mip_model = gp.read(mip_item, env=gurobi_env)
+            key = mip_item
+
+        # Convert MIP to vector representation
+        gap_info = forge._mip_model_to_gap_info(mip_model, problem_type)
+        mip_to_gap_info[key] = gap_info
+
+    # Close Gurobi environment
+    gurobi_env.close()
+
+    save_pickle(mip_to_gap_info, mip_to_gap_info_pkl)
+
+    return mip_to_gap_info
+
+
 def _validate_forge(forge, check_trained=False):
     check_true(isinstance(forge, Forge), TypeError("Error: Forge input should be a Forge instance."))
 
     if check_trained:
         check_true(forge.is_trained, ValueError("Error: Forge has not been trained."))
-
-    # # Train/test data
-    # check_true(data is not None, ValueError("Data input cannot be none."))
-    # check_true(isinstance(data, (str, pd.DataFrame)),
-    #            TypeError("Data should be string of filepath or data frame."))
-    #
-    # if save_file is not None:
-    #     check_true(isinstance(save_file, (bool, str)),
-    #                TypeError("Save file should be boolean or a string filepath."))

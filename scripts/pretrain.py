@@ -27,6 +27,8 @@ if __name__ == "__main__":
                         help='Number of training steps per MIP instance per epoch')
     parser.add_argument('--learning_rate', type=float, default=1e-4,
                         help='Learning rate for the optimizer')
+    parser.add_argument('--weight_decay', type=float, default=1e-4,
+                        help='Weight decay for the optimizer')
     parser.add_argument('--max_dgl_nodes', type=int, default=2100,
                         help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
     args = parser.parse_args()
@@ -45,5 +47,6 @@ if __name__ == "__main__":
              epochs=args.epochs,
              steps_per_instance=args.steps_per_instance,
              learning_rate=args.learning_rate,
+             weight_decay=args.weight_decay,
              max_dgl_nodes=args.max_dgl_nodes)
 
