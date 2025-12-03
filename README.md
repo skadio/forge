@@ -1,7 +1,7 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
 Forge is a research library designed for representational learning in combinatorial problems. 
 
-## Quick Start: Pre-Train
+## Quick Start: Pre-Train Embeddings
 
 ```python
 from forge.embeddings import Forge
@@ -13,7 +13,7 @@ forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
 # Pretrain Forge on a set of MIP instances
 pretrain(forge=forge,
          input_mip_folder="/data/train/",
-         output_mip_to_mipinfo_pkl="/models/mip_to_mipinfo.pkl",    # Bipartite graphs and metadata
+         output_mip_to_mipinfo_pkl="/models/mip_to_mipinfo.pkl",    # Bipartite graph and mip metadata
          output_forge_pretrained_pkl="/models/forge_pretrained.pkl",
          output_log_file="/models/forge_pretrained.log")
 ```
@@ -24,7 +24,7 @@ cd forge
 python -m forge.scripts.pretrain --train_config_yaml `/forge/configs/train_config.yaml` --input_mip_folder `/data/train/` --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl `/models/mip_to_mipinfo.pkl` --output_forge_pkl `/models/forge_pretrained.pkl` --output_log_file `/models/forge_pretrained.log`
 ```
 
-## Quick Start: Embeddings
+## Quick Start: Generate Embeddings
 ```python
 from forge.embeddings import Forge
 from forge.pipeline import mip_to_embeddings
@@ -47,10 +47,10 @@ mip_to_embeddings_dict = mip_to_embeddings(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m forge.scripts.mip_to_embeddings --train_config_yaml `/forge/configs/train_config.yaml` --input_mips `/data/test/` --output_mip_to_embeddings_pkl `/models/mip_to_embeddings.pkl`
+python -m forge.scripts.mip_to_embeddings --train_config_yaml `/forge/configs/train_config.yaml` --input_forge_pkl `/models/forge_pretrained.pkl` --input_mips `/data/test/` --output_mip_to_embeddings_pkl `/models/mip_to_embeddings.pkl`
 ```
 
-## Quick Start: Fine-Tune Integral Gap Prediction
+## Quick Start: Fine-Tune Integral Gap
 
 ```python
 from forge.embeddings import Forge
@@ -60,24 +60,57 @@ from forge.utils import Constants
 # Forge model with its pre-trained configuration
 forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
 
-# Load pre-trained model ready for fine-tuning
+# Load pre-trained model ready for integrality gap 
 forge.load_model(input_forge_pkl="/models/forge_pretrained.pkl", model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP)
 
 # Fine-tune Forge to predict integral gaps
 finetune_integral_gap(forge=forge,
                       input_mip_folder="/data/train/",
-                      output_forge_finetuned_pkl="/models/forge_finetuned.pkl",
+                      output_forge_finetuned_pkl="/models/forge_integral_gap.pkl",
                       output_mip_to_gapinfo_pkl="/models/mip_to_gapinfo.pkl")
 ```
 
 ##### Command Line
 ```bash
 cd forge
-python -m forge.scripts.finetune_integral_gap --train_config_yaml `/forge/configs/train_config.yaml` --input_mip_folder `/data/train/` --output_forge_finetuned_pkl `/models/forge_finetuned.pkl` --output_mip_to_gapinfo_pkl `/models/mip_to_gapinfo.pkl`
+python -m forge.scripts.finetune_integral_gap --train_config_yaml `/forge/configs/train_config.yaml` --input_forge_pkl `/models/forge_pretrained.pkl` --input_mip_folder `/data/train/` --output_forge_finetuned_pkl `/models/forge_integral_gap.pkl` --output_mip_to_gapinfo_pkl `/models/mip_to_gapinfo.pkl`
+```
+
+## Quick Start: Predict Integral Gap
+
+```python
+from forge.embeddings import Forge
+from forge.pipeline import mip_to_gap_info
+from forge.utils import Constants
+
+# Forge model with its pre-trained configuration
+forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
+
+# Load pre-trained model ready for integrality gap
+forge.load_model(input_forge_pkl="/models/forge_integral_gap.pkl", model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP)
+
+# Predict integral gaps
+# Each MIP instance is mapped to a GapInfo object, Dict[str, GapInfo], containing:
+#   - ratio: float, the predicted ratio between lp and mip
+#   - mip_sol: None, there is no solution prediction, just the gap
+#   - mip_obj: the predicted objective value of the mip solution 
+#   - lp_obj: the true objective value of the lp relaxation solution 
+mip_to_gap_info_dict = mip_to_gap_info(forge=forge,
+                                       input_mips="/data/test/",
+                                       output_mip_to_gap_info_pkl="/models/mip_to_gapinfo.pkl",
+                                       problem_type="SC")
+```
+
+##### Command Line
+```bash
+cd forge
+python -m forge.scripts.mip_to_gap_info --train_config_yaml `/forge/configs/train_config.yaml` --input_forge_pkl `/models/forge_integral_gap.pkl` --input_mips `/data/test/` --output_mip_to_gap_info_pkl `/models/mip_to_gapinfo.pkl` --problem_type SC
 ```
 
 ## Installation
 Forge requires **Python 3.10** and can be installed via `pip install forge`. 
+
+As the backbone for graph neural networks, Forge uses [VQGraph](https://github.com/YangLing0818/VQGraph).
 
 ### Installation from Source Code
 ```
@@ -99,6 +132,6 @@ $ python -m unittest discover tests
 Please submit bug reports and feature requests as [Issues](https://github.com/skadio/forge/issues).
 
 ## License
-Forge is licensed under the [Apache License 2.0](LICENSE.md).
+Forge is licensed under the [Apache License 2.0](LICENSE).
 
 <br>

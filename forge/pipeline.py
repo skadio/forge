@@ -241,7 +241,8 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
 
 
 def mip_to_gap_info(forge: Forge,
-                    input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]], mip_to_gap_info_pkl: str,
+                    input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
+                    output_mip_to_gap_info_pkl: str,
                     problem_type: str) -> Dict[str, GapInfo]:
     """
     Generate gap information for one or more MIP inputs using a trained Forge instance.
@@ -255,7 +256,7 @@ def mip_to_gap_info(forge: Forge,
         Path to a single MIP file,
         A single gurobipy model instance,
         Or a list/tuple mixing these types.
-    mip_to_gap_info_pkl : str
+    output_mip_to_gap_info_pkl : str
         Filepath where the resulting mapping from MIP identifiers to gap information will be saved (pickle).
     problem_type : str
         The type of problem for which gap information is to be computed.
@@ -289,7 +290,8 @@ def mip_to_gap_info(forge: Forge,
         # Read MIP file to a Gurobi model (or use the provided model)
         if isinstance(mip_item, gp.Model):
             mip_model = mip_item
-            key = getattr(mip_model, "ModelName", "gurobi_model")
+            # Using id() in case multiple unnamed models are provided
+            key = getattr(mip_model, "ModelName", f"gurobi_{id(mip_model)}")
         else:
             mip_model = gp.read(mip_item, env=gurobi_env)
             key = mip_item
@@ -301,7 +303,7 @@ def mip_to_gap_info(forge: Forge,
     # Close Gurobi environment
     gurobi_env.close()
 
-    save_pickle(mip_to_gap_info, mip_to_gap_info_pkl)
+    save_pickle(mip_to_gap_info, output_mip_to_gap_info_pkl)
 
     return mip_to_gap_info
 

@@ -5,6 +5,7 @@ from forge.pipeline import mip_to_gap_info
 from forge.utils import Constants
 
 if __name__ == "__main__":
+
     # Parameters
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
@@ -14,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument('--input_mips', type=str, default='/data/train/',
                         help='Path to MIP file, directory, or model')
     parser.add_argument('--output_mip_to_gap_info_pkl', type=str, default='/models/output_mip_to_gap_info.pkl',
-                        help='Output pickle file for embeddings')
+                        help='Output pickle file for gap info')
     # TODO consider removing problem_type in future
     parser.add_argument('--problem_type', type=str, default='SC',
                         help='The type of the problem domain CA, GISP, MVC, SC')
@@ -30,5 +31,5 @@ if __name__ == "__main__":
     # Generate embeddings
     mip_to_gap_info_dict = mip_to_gap_info(forge=forge,
                                            input_mips=args.input_mips,
-                                           mip_to_gap_info_pkl=args.output_mip_to_gap_info_pkl,
+                                           output_mip_to_gap_info_pkl=args.output_mip_to_gap_info_pkl,
                                            problem_type=args.problem_type)

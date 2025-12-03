@@ -674,7 +674,7 @@ class Forge(nn.Module):
                         # Predict gap ratio
                         # TODO what's the magic -1? (layer?)
                         gap_ratio_pred = torch.mean(h_list[-1][mip_info.num_cons:, :])
-                        gap_ratio_true = input_mip_to_gapinfo[mip].ratio
+                        gap_ratio_true = input_mip_to_gapinfo[mip].gap_ratio
 
                         # TODO comment here
                         if gap_ratio_true > 1:
@@ -731,6 +731,11 @@ class Forge(nn.Module):
 
         Returns
         -------
+        GapInfo
+            Dataclass containing: lp_obj, lp_sol, mip_obj, mip_sol, gap_ratio
+            The lp_obj and lp_sol are true values from solving the LP relaxation.n.
+            The mip_obj is predicted using the gap ratio prediction from Forge.
+            The mip_sol is set to None.
 
         Raises
         ------
@@ -775,6 +780,7 @@ class Forge(nn.Module):
         lp_model = mip_model.relax()
         lp_model.optimize()
         lp_obj = lp_model.ObjVal
+        lp_sol = lp_model.Xn
 
         # TODO consider generalizing/removing in future
         # Add a buffer to the ratio to make sure we are not infeasible
@@ -792,7 +798,7 @@ class Forge(nn.Module):
             mip_obj =lp_obj * gap_ratio
 
         # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
-        gap_info = GapInfo(ratio=gap_ratio, mip_sol=None, mip_obj=mip_obj, lp_obj=lp_obj)
+        gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
 
         return gap_info
 

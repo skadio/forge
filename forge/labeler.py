@@ -7,11 +7,13 @@ from forge.utils import save_pickle
 
 
 class GapInfo:
-    def __init__(self, ratio: float, mip_sol: Any, mip_obj: float, lp_obj: float):
-        self.ratio = ratio
-        self.mip_sol = mip_sol
-        self.mip_obj = mip_obj
+    def __init__(self, lp_obj: float, lp_sol:Any, mip_obj: float, mip_sol: Any, gap_ratio: float):
         self.lp_obj = lp_obj
+        self.lp_sol = lp_sol
+        self.mip_obj = mip_obj
+        self.mip_sol = mip_sol
+        self.gap_ratio = gap_ratio
+
 
 class MIPLabeler:
 
@@ -50,18 +52,22 @@ class MIPLabeler:
                 print(f"\rInstance : {idx} | Skipped (status: MIP={mip_model.status}, LP={lp_model.status})", end='')
                 continue
 
+            # Retrive lp and mip objective values and solutions
+            lp_obj = lp_model.objVal
+            lp_sol = lp_model.Xn
+            mip_obj = mip_model.objVal
+            mip_sol = mip_model.Xn
+
             # Calculate ratio (handle zero division)
             # TODO does this assume minimization?
-            min_val = min(mip_model.objVal, lp_model.objVal)
-            max_val = max(mip_model.objVal, lp_model.objVal)
+            min_val = min(mip_obj, lp_obj)
+            max_val = max(mip_obj, lp_obj)
             ratio = 1.0 if max_val == 0 else min_val / max_val
-            mip_obj = mip_model.objVal
-            lp_obj = lp_model.objVal
-            mip_sol = mip_model.Xn
+
             print("\rInstance : ", idx, "| Ratio : ", ratio, end='')
 
             # Store gap information
-            mip_to_gapinfo[mip_file] = GapInfo(ratio=ratio, mip_sol=mip_sol, mip_obj=mip_obj, lp_obj=lp_obj)
+            mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
 
         # TODO in original code, this is indented incorrectly? it was inside the for-loop above
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)

@@ -19,7 +19,7 @@ if __name__ == "__main__":
                         help='Path to write the pretraining log')
     parser.add_argument('--input_mip_to_mipinfo_pkl', type=str, default=None,
                         help='Optional path to an existing mip_to_mipinfo pickle to load instead of generating it')
-    parser.add_argument('--relaxation_list', nargs='+', type=float, default=[0.05, 0.01],
+    parser.add_argument('--relaxation_list', nargs='*', type=float, default=[0.05, 0.01],
                         help='Space-separated list of relaxation values to use during pretraining')
     parser.add_argument('--epochs', type=int, default=10,
                         help='Number of training epochs')
