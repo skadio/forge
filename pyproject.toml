@@ -17,21 +17,20 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "dgl",
     "gurobipy",
     "numpy",
     "pandas",
     "scikit-learn",
     "scipy",
-    "torch",
-    "pyyaml",
     # VQ dependencies
     "category-encoders",
+    "dgl==2.4.0",   # conda install -y -c dglteam/label/th24_cu124 dgl
+    "pydantic",     # required by dgl
     "einops",
     "googledrivedownloader",
     "ogb",
-    # Other
-    "marimo[recommended]"
+    "pyyaml",
+    "torch==2.4.0"
 ]
 dynamic = ["version"]
 

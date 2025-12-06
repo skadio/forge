@@ -14,12 +14,12 @@ from dgl.nn import SAGEConv
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given
-# TODO consider changing with the other library to remove the code copy to a fix/static version
+# TODO consider update to vector-quantize-pytorch to remove code copy to a fix/static version
 from vqgraph.vq import VectorQuantize
 
 
 class Forge(nn.Module):
-    """Forge model: GraphSAGE encoder with Vector Quantization for MIP graphs.
+    """Forge model: GraphSAGE+ encoder with Vector Quantization for MIP graphs.
     It is designed to learn discrete representations of MIP instances represented as bipartite graphs.
     This class constructs a GraphSAGE-based encoder, optional prediction heads, and a vector quantization module.
 
