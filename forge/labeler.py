@@ -21,10 +21,10 @@ class MIPLabeler:
         pass
 
     @staticmethod
-    def get_mip_to_integral_gap(input_mip_folder,
-                                output_mip_to_gapinfo_pkl,
-                                gapinfo_time_limit: int = 120,
-                                has_return=False) -> Dict[str, GapInfo]:
+    def get_mip_to_gapinfo(input_mip_folder,
+                           output_mip_to_gapinfo_pkl,
+                           gapinfo_time_limit: int = 120,
+                           has_return=False) -> Dict[str, GapInfo]:
 
         mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=False)
 

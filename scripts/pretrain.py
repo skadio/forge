@@ -29,7 +29,7 @@ if __name__ == "__main__":
                         help='Learning rate for the optimizer')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for the optimizer')
-    parser.add_argument('--max_dgl_nodes', type=int, default=2100,
+    parser.add_argument('--max_garph_nodes', type=int, default=2100,
                         help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
     args = parser.parse_args()
 
@@ -48,5 +48,5 @@ if __name__ == "__main__":
              steps_per_instance=args.steps_per_instance,
              learning_rate=args.learning_rate,
              weight_decay=args.weight_decay,
-             max_dgl_nodes=args.max_dgl_nodes)
+             max_graph_nodes=args.max_garph_nodes)
 

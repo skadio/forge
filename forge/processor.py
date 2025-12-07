@@ -17,7 +17,7 @@ import os
 import time
 from typing import List, Any, Dict, Optional, Union
 
-import dgl
+# import dgl
 import gurobipy as gp
 import numpy as np
 import scipy.sparse as sp
@@ -36,25 +36,32 @@ class MIPInfo:
     ----------
     instance_name : Optional[str]
         Path or unique identifier of the MIP instance.
-    dgl_graph : Optional[dgl.DGLGraph]
-        DGL graph representing the bipartite MIP constraint-variable structure.
+    edge_index : Optional[torch.LongTensor]
+        PyG-style edge index tensor of shape (2, num_edges) representing graph connectivity.
+        Row 0 = source indices, row 1 = target indices.
+    edge_weight : Optional[torch.FloatTensor]
+        Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
     feature_tensor : Optional[torch.Tensor]
-        Node feature tensor for the DGL graph (constraints first, then variables).
+        Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
     num_cons : Optional[int]
-        Number of constraints in the original MIP.
+        Number of constraints in the original MIP. Prefix of `feature_tensor`
     num_vars : Optional[int]
-        Number of variables in the original MIP.
+        Number of variables in the original MIP. Suffix of `feature_tensor`
     """
 
     def __init__(self,
                  instance_name: str = None,
-                 dgl_graph: Optional[dgl.DGLGraph] = None,
+                 # dgl_graph: Optional[dgl.DGLGraph] = None,
+                 edge_index: Optional[torch.Tensor] = None,  # Shape: (2, num_edges)
+                 edge_weight: Optional[torch.Tensor] = None,  # Shape: (num_edges,)
                  feature_tensor: Optional[torch.Tensor] = None,
                  num_cons: int = None,
                  num_vars: int = None):
 
         self.instance_name: Optional[str] = instance_name
-        self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
+        # self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
+        self.edge_index: Optional[torch.Tensor] = edge_index
+        self.edge_weight: Optional[torch.Tensor] = edge_weight
         # TODO: what's the row,column of feature tensor? is it num_con + num_var, feat_dim=10?
         self.feature_tensor: Optional[torch.Tensor] = feature_tensor
         self.num_cons: Optional[int] = num_cons
@@ -180,9 +187,9 @@ class MIPProcessor:
             mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
 
             # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-            mip_info = self._mip_model_to_mip_info(mip_model)
-            mip_info.instance_name = sorted_mip_files[idx]
-            mip_to_mipinfo[mip_info.instance_name] = mip_info
+            mipinfo = self._mip_model_to_mipinfo(mip_model)
+            mipinfo.instance_name = sorted_mip_files[idx]
+            mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
             if relaxation_list:
                 cons = mip_model.getConstrs()
@@ -198,15 +205,15 @@ class MIPProcessor:
                     mip_model.update()
 
                     # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-                    mip_info = self._mip_model_to_mip_info(mip_model)
+                    mipinfo = self._mip_model_to_mipinfo(mip_model)
                     orig_path = sorted_mip_files[idx]
                     base, ext = os.path.splitext(orig_path)
-                    mip_info.instance_name = f"{base}_relaxed_{ratio}{ext}"
-                    mip_to_mipinfo[mip_info.instance_name] = mip_info
+                    mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
+                    mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
                     # Save the perturbed MIP instance to disk
                     if is_save_relaxed:
-                        mip_model.write(mip_info.instance_name)
+                        mip_model.write(mipinfo.instance_name)
 
                     # Re-add removed constraints to restore original model for next iteration
                     for c in cons_remove_:
@@ -246,13 +253,14 @@ class MIPProcessor:
         return mipinfo_list
 
     @staticmethod
-    def _mip_model_to_mip_info(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
+    def _mip_model_to_mipinfo(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
         """
         Convert a Gurobi model into a MIPInfo.
 
         The produced MIPInfo contains:
-        - `dgl_graph`: a bipartite graph where the first `num_cons` nodes are constraints
-          and the next `num_vars` nodes are variables.
+        - `edge_index`: PyG COO `(2, E)` connectivity for the bipartite graph where the first
+          `num_cons` nodes are constraints and the next `num_vars` nodes are variables.
+        - `edge_weight`: per-edge normalized coefficient values (FloatTensor of length `E`).
         - `feature_tensor`: node features stacked with constraints first then variables.
         - `num_cons`, `num_vars`: counts used to interpret the graph layout.
 
@@ -306,14 +314,17 @@ class MIPProcessor:
         adj_sp = sp.csr_matrix(adj)
         adj_coo = adj_sp.tocoo()
 
-        # Create DGL graph
-        dgl_graph = dgl.graph((adj_coo.row, adj_coo.col))
-        if not dgl_graph:
-            if is_debug:
-                print("WARNING: DGL returned false, MIPInfo is empty")
-            return MIPInfo()
-        if is_debug:
-            print("Graph Created in ", time.time() - s, "seconds")
+        # Decommission: Create DGL graph
+        # dgl_graph = dgl.graph((adj_coo.row, adj_coo.col))
+        # if not dgl_graph:
+        #     if is_debug:
+        #         print("WARNING: DGL returned false, MIPInfo is empty")
+        #     return MIPInfo()
+        # if is_debug:
+        #     print("Graph Created in ", time.time() - s, "seconds")
+
+        # Create PyG edge_index (shape: 2 x num_edges)
+        edge_index = torch.tensor(np.array([adj_coo.row, adj_coo.col]), dtype=torch.long)
 
         # TODO should this block use coefficient_matrix or A?
         coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
@@ -325,21 +336,30 @@ class MIPProcessor:
         edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
         edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
         edge_weights += 1e-4
+        edge_weight = torch.FloatTensor(edge_weights) # needed for PyG
 
+        # Validate dimensions
+        check_true(edge_index.shape[1] == edge_weight.shape[0],
+                   ValueError(f"Error: edge_index has {edge_index.shape[1]} edges but "
+                              f"edge_weight has {edge_weight.shape[0]} entries"))
+
+        # Decommission DGL
         # TODO so we are adding custom fields to the dgl graph here? Some comment would be helpful
-        # TODO what's row/column of edge tensor? (after transpose)
-        dgl_graph.ndata["feat"] = feature_tensor
-        dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
-
-        check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
-                   ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
-                              f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
+        # # TODO what's row/column of edge tensor? (after transpose?)
+        # dgl_graph.ndata["feat"] = feature_tensor
+        # dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
+        #
+        # check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
+        #            ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
+        #                       f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
 
         # TODO not sure why we are returning dgl_graph and feature_tensor separately since
         # feature_tensor is already stored in dgl_graph.ndata["feat"]
         # and by the same token, why MIPInfo does not have edge_tensor?
-        return MIPInfo(dgl_graph=dgl_graph,
-                       feature_tensor=dgl_graph.ndata["feat"],
+        return MIPInfo(edge_index=edge_index,
+                       edge_weight=edge_weight,
+                       # dgl_graph=dgl_graph,
+                       feature_tensor=feature_tensor,
                        num_cons=num_cons,
                        num_vars=num_vars)
 

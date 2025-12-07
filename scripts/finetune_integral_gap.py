@@ -31,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=5e-4,
                         help='Weight decay for the optimizer')
     # TODO default max nodes for pretraining is 2100 and here it is 30000, very different, no?
-    parser.add_argument('--max_dgl_nodes', type=int, default=30000,
+    parser.add_argument('--max_graph_nodes', type=int, default=30000,
                         help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
     parser.add_argument('--gapinfo_time_limit', type=int, default=120,
                         help='Time limit in seconds for computing integral gap info (default: 120)')
@@ -53,5 +53,5 @@ if __name__ == "__main__":
                           steps_per_instance=args.steps_per_instance,
                           learning_rate=args.learning_rate,
                           weight_decay=args.weight_decay,
-                          max_dgl_nodes=args.max_dgl_nodes,
+                          max_graph_nodes=args.max_graph_nodes,
                           gapinfo_time_limit=args.gapinfo_time_limit)

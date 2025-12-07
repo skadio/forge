@@ -18,7 +18,7 @@ def finetune_integral_gap(forge: Forge,
                           steps_per_instance: Optional[int] = None,
                           learning_rate: Optional[float] = None,
                           weight_decay: Optional[float] = None,
-                          max_dgl_nodes: Optional[int] = None,
+                          max_graph_nodes: Optional[int] = None,
                           gapinfo_time_limit: int = 120) -> None:
     """Fine-tune a pre-trained Forge model for integrality gap prediction from a folder of MIP files.
 
@@ -43,8 +43,8 @@ def finetune_integral_gap(forge: Forge,
         Learning rate for fine-tuning.
     weight_decay : Optional[float], default=None
         Weight decay for fine-tuning.
-    max_dgl_nodes : Optional[int], default=None
-        Maximum number of DGL nodes allowed.
+    max_graph_nodes : Optional[int], default=None
+        Maximum number of graph nodes allowed.
     gapinfo_time_limit : int, default=120
         Time limit (in seconds) for computing gap information for each MIP instance.
 
@@ -72,10 +72,10 @@ def finetune_integral_gap(forge: Forge,
 
         # Get MIP to integral gap ratio labels for fine-tuning
         labeler = MIPLabeler()
-        mip_to_gapinfo = labeler.get_mip_to_integral_gap(input_mip_folder=input_mip_folder,
-                                                         output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
-                                                         gapinfo_time_limit=gapinfo_time_limit,
-                                                         has_return=True)
+        mip_to_gapinfo = labeler.get_mip_to_gapinfo(input_mip_folder=input_mip_folder,
+                                                    output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
+                                                    gapinfo_time_limit=gapinfo_time_limit,
+                                                    has_return=True)
 
     # Fine-tune the Forge model
     forge._finetune_integral_gap(input_mip_to_gapinfo=mip_to_gapinfo,
@@ -84,7 +84,7 @@ def finetune_integral_gap(forge: Forge,
                                  steps_per_instance=steps_per_instance,
                                  learning_rate=learning_rate,
                                  weight_decay=weight_decay,
-                                 max_dgl_nodes=max_dgl_nodes)
+                                 max_graph_nodes=max_graph_nodes)
 
 
 def pretrain(forge: Forge,
@@ -98,7 +98,7 @@ def pretrain(forge: Forge,
              steps_per_instance: Optional[int] = None,
              learning_rate: Optional[float] = None,
              weight_decay: Optional[float] = None,
-             max_dgl_nodes: Optional[int] = None) -> None:
+             max_graph_nodes: Optional[int] = None) -> None:
     """Pre-train a Forge model.
 
     You can either:
@@ -132,7 +132,7 @@ def pretrain(forge: Forge,
         Learning rate for the optimizer. If `None`, the learning rate defined in `forge` will be used.
     weight_decay : Optional[float], optional
         Weight decay for the optimizer. If `None`, the weight decay defined in `forge`
-    max_dgl_nodes : Optional[int], optional
+    max_graph_nodes : Optional[int], optional
         Maximum number of graph nodes when converting MIP instances to DGL graphs. If `None`, no
         additional node cap is applied beyond defaults in the conversion utilities.
 
@@ -177,7 +177,7 @@ def pretrain(forge: Forge,
                     steps_per_instance=steps_per_instance,
                     learning_rate=learning_rate,
                     weight_decay=weight_decay,
-                    max_dgl_nodes=max_dgl_nodes)
+                    max_graph_nodes=max_graph_nodes)
 
 
 def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
@@ -297,7 +297,7 @@ def mip_to_gap_info(forge: Forge,
             key = mip_item
 
         # Convert MIP to vector representation
-        gap_info = forge._mip_model_to_gap_info(mip_model, problem_type)
+        gap_info = forge._mip_model_to_gapinfo(mip_model, problem_type)
         mip_to_gap_info[key] = gap_info
 
     # Close Gurobi environment
