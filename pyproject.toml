@@ -20,18 +20,19 @@ dependencies = [
     "gurobipy",
     "numpy",
     "pandas",
+    "pyyaml",
     "torch-geometric",
     "scikit-learn",
     "scipy",
+    "vector-quantize-pytorch",
     # VQ dependencies
-    "category-encoders",
-    "dgl==2.4.0",   # conda install -y -c dglteam/label/th24_cu124 dgl
-    "pydantic",     # required by dgl
-    "einops",
-    "googledrivedownloader",
-    "ogb",
-    "pyyaml",
-    "torch==2.4.0"
+#    "category-encoders",
+#    "dgl==2.4.0",   # conda install -y -c dglteam/label/th24_cu124 dgl
+#    "pydantic",     # required by dgl
+#    "einops",
+#    "googledrivedownloader",
+#    "ogb",
+#    "torch==2.4.0"
 ]
 dynamic = ["version"]
 

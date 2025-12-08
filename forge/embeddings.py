@@ -20,8 +20,8 @@ from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given
 # TODO consider update to vector-quantize-pytorch to remove code copy to a fix/static version
-from vqgraph.vq import VectorQuantize
-
+# from vqgraph.vq import VectorQuantize
+from vector_quantize_pytorch import VectorQuantize
 
 class Forge(nn.Module):
     """Forge model: GraphSAGE+ encoder with Vector Quantization for MIP graphs.
@@ -241,11 +241,11 @@ class Forge(nn.Module):
         # Vector quantization module
         self.vq = VectorQuantize(dim=self.updated_input_dim,
                                  codebook_size=self.codebook_size,
+                                 codebook_dim=self.codeword_dim,
                                  decay=self.vq_decay,
                                  commitment_weight=self.vq_commitment_weight,
                                  use_cosine_sim=self.vq_is_cosine_sim,
-                                 orthogonal_reg_weight=self.orthogonal_reg_weight,
-                                 codebook_dim=self.codeword_dim)
+                                 orthogonal_reg_weight=self.orthogonal_reg_weight)
 
     def forward(self, feature_tensor: torch.Tensor,
                 num_cons: int, num_vars: int,
