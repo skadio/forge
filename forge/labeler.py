@@ -38,7 +38,7 @@ class MIPLabeler:
         for idx, mip_file in enumerate(mip_files):
 
             # Create mip model
-            mip_model = gp.read(mip_file, env=gurobi_env)
+            mip_model: gp.Model = gp.read(mip_file, env=gurobi_env)
 
             # Solve LP relaxation
             lp_model = mip_model.copy().relax()
@@ -52,7 +52,12 @@ class MIPLabeler:
                 print(f"\rInstance : {idx} | Skipped (status: MIP={mip_model.status}, LP={lp_model.status})", end='')
                 continue
 
-            # Retrive lp and mip objective values and solutions
+            # Skip instances without a solution
+            if mip_model.SolCount < 1 or lp_model.SolCount < 1:
+                print(f"\rInstance : {idx} | Skipped (status: MIP={mip_model.status}, LP={lp_model.status})", end='')
+                continue
+
+            # Retrieve lp and mip objective values and solutions
             lp_obj = lp_model.objVal
             lp_sol = lp_model.Xn
             mip_obj = mip_model.objVal
