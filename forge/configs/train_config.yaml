@@ -8,7 +8,7 @@ codeword_dim: 1024
 codebook_size: 5000
 dropout_ratio: 0.4
 norm_type: "none"
-graph_sage_aggregation: "mean"
+graph_sage_aggregation: "mean" # add/mean/max
 
 # Loss Weight Parameters (currently not used)
 lambda_edge: 1

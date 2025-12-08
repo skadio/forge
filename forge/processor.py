@@ -1,16 +1,16 @@
 """
 processor.py
 
-Utilities to convert Gurobi MIP instances into graph data structures used by a GNN.
+Utilities to convert Gurobi MIP instances into PyG graph tensors used by the Forge GNN.
 
 This module provides:
-- MIPInfo: a lightweight container for instance metadata and graph features.
-- MIPProcessor: read MIP files, optionally relaxes them, convert to DGL graphs with node/edge features,
-  and save/load pickled representations.
+- MIPInfo: a lightweight container for instance metadata plus PyG tensors.
+- MIPProcessor: read MIP files, optionally relax them,
+    convert to PyG edge/feature tensors, and save/load pickled representations.
 
 Notes
 -----
-- Designed to work with gurobipy, DGL, PyTorch and SciPy sparse matrices.
+- Designed to work with gurobipy, PyTorch Geometric (PyG), PyTorch and SciPy sparse matrices.
 - Many helper functions assume Gurobi model APIs such as getVars, getConstrs and getA.
 """
 import os
@@ -30,7 +30,7 @@ from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, 
 
 class MIPInfo:
     """
-    Container for converted MIP instance data.
+    Container for converted MIP instance data stored in PyG format.
 
     Attributes
     ----------
@@ -51,21 +51,19 @@ class MIPInfo:
 
     def __init__(self,
                  instance_name: str = None,
-                 # dgl_graph: Optional[dgl.DGLGraph] = None,
-                 edge_index: Optional[torch.Tensor] = None,  # Shape: (2, num_edges)
-                 edge_weight: Optional[torch.Tensor] = None,  # Shape: (num_edges,)
                  feature_tensor: Optional[torch.Tensor] = None,
-                 num_cons: int = None,
-                 num_vars: int = None):
+                 num_cons: int = None, num_vars: int = None,
+                 edge_index: Optional[torch.Tensor] = None,
+                 edge_weight: Optional[torch.Tensor] = None):
 
         self.instance_name: Optional[str] = instance_name
         # self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
-        self.edge_index: Optional[torch.Tensor] = edge_index
-        self.edge_weight: Optional[torch.Tensor] = edge_weight
         # TODO: what's the row,column of feature tensor? is it num_con + num_var, feat_dim=10?
         self.feature_tensor: Optional[torch.Tensor] = feature_tensor
         self.num_cons: Optional[int] = num_cons
         self.num_vars: Optional[int] = num_vars
+        self.edge_index: Optional[torch.Tensor] = edge_index
+        self.edge_weight: Optional[torch.Tensor] = edge_weight
 
 
 class MIPEmbeddings:
@@ -258,11 +256,11 @@ class MIPProcessor:
         Convert a Gurobi model into a MIPInfo.
 
         The produced MIPInfo contains:
+        - `feature_tensor`: node features stacked with constraints first then variables.
+        - `num_cons`, `num_vars`: counts used to interpret the graph layout.
         - `edge_index`: PyG COO `(2, E)` connectivity for the bipartite graph where the first
           `num_cons` nodes are constraints and the next `num_vars` nodes are variables.
         - `edge_weight`: per-edge normalized coefficient values (FloatTensor of length `E`).
-        - `feature_tensor`: node features stacked with constraints first then variables.
-        - `num_cons`, `num_vars`: counts used to interpret the graph layout.
 
         Parameters
         ----------
@@ -300,7 +298,7 @@ class MIPProcessor:
             print("Feature Tensor Computed in ", time.time() - s, "seconds")
 
         if is_debug:
-            print("Creating DGL Graph")
+            print("Creating PyG edge tensors")
             s = time.time()
 
         # Get constraint matrix TODO comment on what's adj and coeff_adj
@@ -356,12 +354,8 @@ class MIPProcessor:
         # TODO not sure why we are returning dgl_graph and feature_tensor separately since
         # feature_tensor is already stored in dgl_graph.ndata["feat"]
         # and by the same token, why MIPInfo does not have edge_tensor?
-        return MIPInfo(edge_index=edge_index,
-                       edge_weight=edge_weight,
-                       # dgl_graph=dgl_graph,
-                       feature_tensor=feature_tensor,
-                       num_cons=num_cons,
-                       num_vars=num_vars)
+        return MIPInfo(feature_tensor=feature_tensor, num_cons=num_cons, num_vars=num_vars, edge_index=edge_index,
+                       edge_weight=edge_weight)
 
     @staticmethod
     def _get_feature_tensor_num_cons_num_vars(mip_model):

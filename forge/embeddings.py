@@ -180,6 +180,7 @@ class Forge(nn.Module):
         self.epochs: int = config.get('epochs')
         self.steps_per_instance: int = config.get('steps_per_instance')
         self.learning_rate: float = config.get('learning_rate')
+        self.weight_decay: float = config.get('weight_decay')
         self.max_graph_nodes: int = config.get('max_graph_nodes')
 
         # Load seed
@@ -246,25 +247,24 @@ class Forge(nn.Module):
                                  orthogonal_reg_weight=self.orthogonal_reg_weight,
                                  codebook_dim=self.codeword_dim)
 
-    def forward(self,
-                # dgl_graph: dgl.DGLGraph, # Decommission DGL
-                edge_index: torch.Tensor,
-                edge_weight: torch.Tensor,
-                feature_tensor: torch.Tensor,
-                num_cons: int,
-                num_vars: int) \
+    def forward(self, feature_tensor: torch.Tensor, num_cons: int, num_vars: int, edge_index: torch.Tensor,
+                edge_weight: Optional[torch.Tensor]) \
             -> Tuple[List[torch.Tensor], torch.Tensor, Union[torch.Tensor, int], torch.Tensor, Union[
                 torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
         """Forward pass of the Forge models.
 
-        Notes
-        -----
-        DGL usage has been decommissioned. This forward now accepts PyG-style graph inputs:
-        - `edge_index`: a `[2, E]` `torch.Tensor` containing source and target node indices.
-        - `edge_weight`: a `[E]` `torch.Tensor` of edge weights (or `None`), used by message passing.
-
         Parameters
         ----------
+        feature_tensor : torch.Tensor
+            Node feature matrix of shape (num_cons + num_vars, feat_dim=10 zero padded features).
+            Provided externally by the graph construction utilities.
+            This will be transformed through GraphSAGE + linear layer.
+        num_cons : int
+            Number of constraint nodes (prefix of `feature_tensor`).
+            Used to slice embeddings when computing bipartite adjacency reconstruction and separating outputs.
+        num_vars : int
+            Number of variable nodes (suffix of `feature_tensor`).
+            Used for variable_proba and integrality_gap heads in downstream.
         edge_index : torch.LongTensor
             PyG COO connectivity with shape `(2, num_edges)`.
             First row = sources, second row = targets.
@@ -277,17 +277,8 @@ class Forge(nn.Module):
             If you need weighted message passing, use a conv that supports weights (e.g. `GCNConv`)
             or implement a custom `MessagePassing`.
             In this codebase `edge_weight` is used for adjacency reconstruction / loss, not in `SAGEConv`.
-        feature_tensor : torch.Tensor
-            Node feature matrix of shape (num_cons + num_vars, 10 zero padded features).
-            Provided externally by the graph construction utilities.
-            This will be transformed through GraphSAGE + linear layer.
-        num_cons : int
-            Number of constraint nodes at the head of `feats` / node index space.
-            Used to slice embeddings when computing bipartite adjacency reconstruction and separating outputs.
-        num_vars : int
-            Number of variable nodes following the constraint nodes.
-            Used for variable_proba and integrality_gap heads in downstream.
-
+            PyG `SAGEConv` does not consume `edge_weight`; Use a weighted convolution layer if message passing
+            should be coefficient-aware.
         Returns
         -------
         h_list : List[torch.Tensor]
@@ -316,6 +307,9 @@ class Forge(nn.Module):
 
         Notes
         -----
+        - DGL usage has been decommissioned. This forward now accepts PyG-style graph inputs:
+            - `edge_index`: a `[2, E]` `torch.Tensor` containing source and target node indices.
+            - `edge_weight`: a `[E]` `torch.Tensor` of edge weights (or `None`), used by message passing.
         - Adjacency reconstruction uses two low-rank factor matrices (`quantized_edge_1`, `quantized_edge_2`)
             to approximate bipartite edges via (A A^T)(B B^T)^T then min-max rescale.
         - Feature and edge reconstruction losses are scaled by `lamb_node` and `lamb_edge`
@@ -333,7 +327,7 @@ class Forge(nn.Module):
 
         # Decommission: DGL GraphSAGE Layer 1
         # h = self.graph_layer_1(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
-        h = self.graph_layer_1(h, edge_index=edge_index) # PyG SageConv does not that edge_weights
+        h = self.graph_layer_1(h, edge_index) # PyG SAGEConv does not accept edge_weight directly
         h = self.activation(h)  # PyG needs explicit activation
         h = self.bn1(h)
         if self.norm_type != "none":
@@ -342,7 +336,7 @@ class Forge(nn.Module):
 
         # Decommission: DGL GraphSAGE Layer 2
         # h = self.graph_layer_2(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
-        h = self.graph_layer_2(h, edge_index=edge_index) # PyG SageConv does not that edge_weights
+        h = self.graph_layer_2(h, edge_index) # PyG SAGEConv does not accept edge_weight directly
         h = self.activation(h) # PyG needs explicit activation
         h = self.bn2(h)
         h = self.dropout(h)
@@ -549,11 +543,8 @@ class Forge(nn.Module):
 
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(edge_index,
-                                                                              edge_weight,
-                                                                              features,
-                                                                              mipinfo.num_cons,
-                                                                              mipinfo.num_vars)
+                    h_list, logits, loss, distances, codebook_ = self.forward(features, mipinfo.num_cons,
+                                                                              mipinfo.num_vars, edge_index, edge_weight)
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
@@ -595,7 +586,7 @@ class Forge(nn.Module):
         Steps
         -----
         - Convert `mip_model` to `MIPInfo` (PyG style).
-        - Call `forward(edge_index, edge_weight, feature_tensor, num_cons, num_vars)` in eval mode.
+        - Call `forward()` in eval mode.
         - Build instance code histogram from `dist` assignments and extract per-node quantized embeddings.
 
         Parameters
@@ -631,15 +622,14 @@ class Forge(nn.Module):
         original_mode = self.is_eval_mode
         self.is_eval_mode = True
 
-        # Convert MIP model to MIP info with DGL graph, features tensor, num cons/vars
+        # Convert MIP model to MIP info with features tensor, num cons/vars, edge index/weight
         mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
         # Forward pass through trained Forge
-        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.edge_index.to(self.device),
-                                                                  mipinfo.edge_weight.to(self.device),
-                                                                  mipinfo.feature_tensor.to(self.device),
-                                                                  mipinfo.num_cons,
-                                                                  mipinfo.num_vars)
+        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+                                                                  mipinfo.num_cons, mipinfo.num_vars,
+                                                                  mipinfo.edge_index.to(self.device),
+                                                                  mipinfo.edge_weight.to(self.device))
         # Restore original mode
         self.is_eval_mode = original_mode
 
@@ -748,11 +738,8 @@ class Forge(nn.Module):
                     optimizer.zero_grad()
 
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(edge_index,
-                                                                              edge_weight,
-                                                                              feature_tensor,
-                                                                              mipinfo.num_cons,
-                                                                              mipinfo.num_vars)
+                    h_list, logits, loss, distances, codebook_ = self.forward(feature_tensor, mipinfo.num_cons,
+                                                                              mipinfo.num_vars, edge_index, edge_weight)
                     # Predict gap ratio
                     # TODO what's the magic -1? (layer?)
                     gap_ratio_pred = torch.mean(h_list[-1][mipinfo.num_cons:, :])
@@ -808,7 +795,7 @@ class Forge(nn.Module):
         Process
         -------
         - Convert `mip_model` to `MIPInfo`.
-        - Run `forward(edge_index, edge_weight, feature_tensor, num_cons, num_vars)` in eval mode.
+        - Run `forward()` in eval mode.
         - Extract `integral_gap` head outputs (variable-level scores) and aggregate to a gap ratio.
         - Solve LP relaxation to obtain `lp_obj` and `lp_sol`, then compute `mip_obj` based on the predicted ratio.
 
@@ -848,15 +835,14 @@ class Forge(nn.Module):
         original_mode = self.is_eval_mode
         self.is_eval_mode = True
 
-        # Convert MIP model to MIP info with DGL graph, features tensor, num cons/vars
+        # Convert MIP model to MIP info with feature tensor and PyG edge_index/edge_weight
         mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
         # Forward pass through trained Forge
-        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.edge_index.to(self.device),
-                                                                  mipinfo.edge_weight.to(self.device),
-                                                                  mipinfo.feature_tensor.to(self.device),
-                                                                  mipinfo.num_cons,
-                                                                  mipinfo.num_vars)
+        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+                                                                  mipinfo.num_cons, mipinfo.num_vars,
+                                                                  mipinfo.edge_index.to(self.device),
+                                                                  mipinfo.edge_weight.to(self.device))
         # Restore original mode
         self.is_eval_mode = original_mode
 
