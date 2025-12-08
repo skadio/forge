@@ -11,16 +11,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
                         help='Path to training config YAML file')
-    parser.add_argument('--input_forge_pretrained.pkl', type=str, default='/models/forge_pretrained.pkl',
+    parser.add_argument('--input_forge_pkl', type=str, default='/models/forge_pretrained.pkl',
                         help='Path to trained Forge pickle file')
     parser.add_argument('--input_mip_folder', type=str, default='/data/train/',
                         help='Path to MIP folder')
-    parser.add_argument('--output_forge_finetuned.pkl', type=str, default='/models/forge_integral_gap.pkl',
+    parser.add_argument('--output_forge_finetuned_pkl', type=str, default='/models/forge_integral_gap.pkl',
                         help='Path to trained Forge pickle file')
     parser.add_argument('--output_mip_to_gapinfo_pkl', type=str,  default='/models/mip_to_gapinfo.pkl',
                         help='Output pickle file to store mip_to_integral_gap')
-    parser.add_argument('--input_mip_to_integral_gap_pkl', type=str, default=None,
-                        help='Optional path to an existing output_mip_to_integral_gap_pkl to load instead of creatig')
+    parser.add_argument('--input_mip_to_gapinfo_pkl', type=str, default=None,
+                        help='Optional path to an existing input_mip_to_gapinfo_pkl to load instead of creating')
     parser.add_argument('--epochs', type=int, default=10,
                         help='Number of training epochs')
     parser.add_argument('--steps_per_instance', type=int, default=10,
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     forge = Forge(args.train_config_yaml)
 
     # Load pre-trained Forge model ready for fine-tuning
-    forge.load_model(input_forge_pkl=args.input_forge_pretrained, model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP)
+    forge.load_model(input_forge_pkl=args.input_forge_pkl, model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP)
 
     # Fine-tune Forge to predict integral gaps
     finetune_integral_gap(forge=forge,

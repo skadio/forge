@@ -31,11 +31,11 @@ class MIPLabeler:
         # Start Gurobi environment
         gurobi_env = MIPProcessor._start_gurobi_env()
 
+        # Set time limit
+        gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
+
         mip_to_gapinfo = {}
         for idx, mip_file in enumerate(mip_files):
-
-            # Set time limit
-            gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
 
             # Create mip model
             mip_model = gp.read(mip_file, env=gurobi_env)
@@ -59,7 +59,9 @@ class MIPLabeler:
             mip_sol = mip_model.Xn
 
             # Calculate ratio (handle zero division)
-            # TODO does this assume minimization?
+            # TODO does this assume minimization? mip_model.ModelSense
+            # For minimization, LP ≤ MIP, so ratio = lp_obj / mip_obj.
+            # For maximization, LP ≥ MIP, so ratio = mip_obj / lp_obj.
             min_val = min(mip_obj, lp_obj)
             max_val = max(mip_obj, lp_obj)
             ratio = 1.0 if max_val == 0 else min_val / max_val
@@ -71,5 +73,7 @@ class MIPLabeler:
 
         # TODO in original code, this is indented incorrectly? it was inside the for-loop above
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
+
+        gurobi_env.close()
 
         return mip_to_gapinfo if has_return else None

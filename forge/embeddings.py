@@ -247,8 +247,9 @@ class Forge(nn.Module):
                                  orthogonal_reg_weight=self.orthogonal_reg_weight,
                                  codebook_dim=self.codeword_dim)
 
-    def forward(self, feature_tensor: torch.Tensor, num_cons: int, num_vars: int, edge_index: torch.Tensor,
-                edge_weight: Optional[torch.Tensor]) \
+    def forward(self, feature_tensor: torch.Tensor,
+                num_cons: int, num_vars: int,
+                edge_index: torch.Tensor, edge_weight: Optional[torch.Tensor]) \
             -> Tuple[List[torch.Tensor], torch.Tensor, Union[torch.Tensor, int], torch.Tensor, Union[
                 torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
         """Forward pass of the Forge models.
@@ -396,6 +397,7 @@ class Forge(nn.Module):
             adj_quantized = torch.matmul(adj_quantized_1, adj_quantized_2.T)
 
             # Min Max Rescaling of Adjacency Matrix
+            # TODO: is there division by zero risk here?
             adj_quantized = (adj_quantized - adj_quantized.min()) / (adj_quantized.max() - adj_quantized.min())
 
             # Look Only at The Bipartite Part of the Graph
@@ -437,6 +439,8 @@ class Forge(nn.Module):
             return
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # TODO Claude says: Rebinding self inside method is misleading but harmless;
+        #  prefer self.to(device) (which is in-place for modules) without reassigning local self.
         self = self.to(device)
 
         if model_type == Constants.FORGE_PRE_TRAIN:
@@ -523,7 +527,7 @@ class Forge(nn.Module):
 
             # MIP instances in dataset
             loss = None
-            # TODO why is this starting from idx 10?
+            # TODO why is this starting from idx 10? are we skipping the first 10 instances?
             for idx in range(10, len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
@@ -537,14 +541,19 @@ class Forge(nn.Module):
 
                 # Push to device before the for-loop below
                 # dgl_graph = mipinfo.dgl_graph.to(self.device)
+                features = mipinfo.feature_tensor.to(self.device)
                 edge_index = mipinfo.edge_index.to(self.device)
                 edge_weight = mipinfo.edge_weight.to(self.device)
-                features = mipinfo.feature_tensor.to(self.device)
 
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(features, mipinfo.num_cons,
-                                                                              mipinfo.num_vars, edge_index, edge_weight)
+                    h_list, logits, loss, distances, codebook_ = self.forward(features,
+                                                                              mipinfo.num_cons, mipinfo.num_vars,
+                                                                              edge_index, edge_weight)
+
+                    # TODO Claude says: This works but is unconventional.
+                    # The gradient from the previous step is cleared after the forward pass of the current step,
+                    # which is fine but could confuse maintainers
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
@@ -653,11 +662,11 @@ class Forge(nn.Module):
     def _finetune_integral_gap(self,
                                input_mip_to_gapinfo: Dict[str, GapInfo],
                                output_forge_finetuned_pkl : str,
-                               epochs: Optional[int] = None,  #10
-                               steps_per_instance: Optional[int] = None,  #10
-                               learning_rate: Optional[float] = None,  #1e-4
-                               weight_decay: Optional[float] = None,  #5e-4
-                               max_graph_nodes: Optional[int] = None  #30000
+                               epochs: Optional[int] = None, #10,
+                               steps_per_instance: Optional[int] = None, # 10,
+                               learning_rate: Optional[float] = None, # 1e-4,
+                               weight_decay: Optional[float] = None, #5e-4,
+                               max_graph_nodes: Optional[int] = None #30000
                                ) -> None:
         """Fine-tune the Forge model for integral gap prediction.
 
@@ -682,6 +691,12 @@ class Forge(nn.Module):
         -------
         None
         """
+
+        epochs = overwrite_if_given(self.epochs, epochs)
+        steps_per_instance = overwrite_if_given(self.steps_per_instance, steps_per_instance)
+        learning_rate = overwrite_if_given(self.learning_rate, learning_rate)
+        weight_decay = overwrite_if_given(self.weight_decay, weight_decay)
+        max_graph_nodes = overwrite_if_given(self.max_graph_nodes, max_graph_nodes)
 
         # TODO in pretraining() we have these --needed here?
         # super().train()
@@ -716,7 +731,7 @@ class Forge(nn.Module):
                 mip_model = gp.read(mip, env=gurobi_env)
 
                 # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-                mipinfo = self._mip_model_to_mipinfo(mip_model)
+                mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
                 # Some instances are too big to fit in the GPU (max_graph_nodes=30000)
                 # if mipinfo.dgl_graph.num_nodes() <= max_graph_nodes:
@@ -746,6 +761,8 @@ class Forge(nn.Module):
                     gap_ratio_true = input_mip_to_gapinfo[mip].gap_ratio
 
                     # TODO comment here
+                    # Claude says: This flips ratios > 1, but the prediction head uses sigmoid (outputs 0-1).
+                    #              If training data has mixed problem types, this creates inconsistent targets.
                     if gap_ratio_true > 1:
                         gap_ratio_true = 1 / gap_ratio_true
 
@@ -757,6 +774,11 @@ class Forge(nn.Module):
 
                     try:
                         gap_loss = torch.abs(gap_ratio_pred - gap_ratio_true)
+                        # TODO Note: mip_sol contains variable values from MIP solutions,
+                        # which may not be binary (e.g., integer variables 0-10, or continuous variables).
+                        # BCE requires targets in [0,1].
+                        # Fix: restrict BCE head training to binary variables only,
+                        # or normalize/clip targets into [0,1] and use appropriate losses for non-binary variables.
                         bce_loss = F.binary_cross_entropy(var_proba_pred.flatten(), var_proba_truth.flatten())
 
                         # TODO comment on weighting here?
