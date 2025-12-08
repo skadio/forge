@@ -13,7 +13,7 @@ authors = [
     {name = "zohairshafi"}
 ]
 classifiers = [
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -21,18 +21,12 @@ dependencies = [
     "numpy",
     "pandas",
     "pyyaml",
-    "torch-geometric",
     "scikit-learn",
     "scipy",
-    "vector-quantize-pytorch",
-    # VQ dependencies
-#    "category-encoders",
-#    "dgl==2.4.0",   # conda install -y -c dglteam/label/th24_cu124 dgl
-#    "pydantic",     # required by dgl
-#    "einops",
-#    "googledrivedownloader",
-#    "ogb",
-#    "torch==2.4.0"
+    "torch",
+    "torch-geometric",
+    "tqdm",
+    "vector-quantize-pytorch"
 ]
 dynamic = ["version"]
 
