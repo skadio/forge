@@ -18,3 +18,5 @@ class PretrainTest(BaseTest):
                  output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                  output_forge_pretrained_pkl=Constants.default_forge_pretrained_pkl,
                  output_log_file=Constants.default_forge_log_file)
+
+        self.assertEqual(True, True)

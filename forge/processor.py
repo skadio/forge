@@ -23,6 +23,7 @@ import numpy as np
 import scipy.sparse as sp
 import torch
 import yaml
+from sympy.combinatorics import Coset
 from tqdm import tqdm
 
 from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
@@ -108,8 +109,8 @@ class MIPProcessor:
     Usage
     -----
     - Initialize with an optional training config file to set RNG seeds.
-    - Call convert_mip_to_mipinfo to read MPS/LP files in a folder and produce
-      pickled MIPInfo objects (optionally relaxing constraints).
+    - Call convert_mip_to_mipinfo to read MPS/LP files in a folder and
+        produce pickled MIPInfo objects (optionally relaxing constraints).
     - Use load_mipinfo_from_pickles to aggregate multiple pickles into a list.
 
     Parameters
@@ -190,20 +191,27 @@ class MIPProcessor:
             mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
             if relaxation_list:
-                cons = mip_model.getConstrs()
-
                 for ratio in relaxation_list:
 
+                    # Create a copy of the original model to remove constraints from
+                    mip_model_relaxed = mip_model.copy()
+                    cons = mip_model_relaxed.getConstrs()
+
+                    # Choose a random number of constraints within the ratio to remove
+                    k = int(len(cons) * ratio)
+                    if k <= 0:
+                        continue
+
                     # Choose a random subset of constraints
-                    cons_remove_ = self.rng.choice(cons, int(len(cons) * ratio), replace=False)
+                    cons_remove_ = self.rng.choice(cons, k, replace=False)
 
-                    # Remove them from the model
+                    # Remove them from the copy model
                     for c in cons_remove_:
-                        mip_model.remove(c)
-                    mip_model.update()
+                        mip_model_relaxed.remove(c)
+                    mip_model_relaxed.update()
 
-                    # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-                    mipinfo = self._mip_model_to_mipinfo(mip_model)
+                    # Generate MIPInfo object from relaxed model, set name, and add to dictionary
+                    mipinfo = self._mip_model_to_mipinfo(mip_model_relaxed)
                     orig_path = sorted_mip_files[idx]
                     base, ext = os.path.splitext(orig_path)
                     mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
@@ -211,15 +219,10 @@ class MIPProcessor:
 
                     # Save the perturbed MIP instance to disk
                     if is_save_relaxed:
-                        mip_model.write(mipinfo.instance_name)
+                        mip_model_relaxed.write(mipinfo.instance_name)
 
-                    # Re-add removed constraints to restore original model for next iteration
-                    for c in cons_remove_:
-                        mip_model.addConstrs(c)
-                    mip_model.update()
-
-            # Release Gurobi model resources
-            mip_model.dispose()
+                    # Release copy model
+                    mip_model_relaxed.dispose()
 
         # Close Gurobi environment
         gurobi_env.close()
@@ -306,7 +309,7 @@ class MIPProcessor:
         A = (coefficient_matrix != 0).astype(int)
 
         adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
-        if not adj:
+        if adj is None or getattr(adj, "size", 0) == 0:
             return False
         # adj = normalize_adj(adj)
         adj_sp = sp.csr_matrix(adj)
@@ -380,8 +383,7 @@ class MIPProcessor:
         # Create variable features
         variables = mip_model.getVars()
         num_vars = len(variables)
-        num_variable_features = 6
-        features_of_var = np.zeros((num_vars, num_variable_features), dtype=float)
+        features_of_var = np.zeros((num_vars, Constants.NUM_VARIABLE_FEATURES), dtype=float)
         for i, var in enumerate(variables):
             features_of_var[i, 0] = float(var.VType == gp.GRB.CONTINUOUS)
             features_of_var[i, 1] = float(var.VType == gp.GRB.BINARY)
@@ -394,13 +396,13 @@ class MIPProcessor:
         constraints = mip_model.getConstrs()
         operators = mip_model.Sense
         num_cons = len(constraints)
-        num_constraint_features = 4
-        features_of_constraint = np.zeros((num_cons, num_constraint_features), dtype=float)
-        for c, o in list(zip(constraints, operators)):
-            features_of_constraint[c, 0] = float(o == '=')
-            features_of_constraint[c, 1] = float(o == '<')
-            features_of_constraint[c, 2] = float(o == '>')
-            features_of_constraint[c, 3] = float(c.RHS)
+        features_of_constraint = np.zeros((num_cons, Constants.NUM_CONSTRAINT_FEATURES), dtype=float)
+        for i, ct in enumerate(constraints):
+            op = operators[i]
+            features_of_constraint[i, 0] = float(op == '=')
+            features_of_constraint[i, 1] = float(op == '<')
+            features_of_constraint[i, 2] = float(op == '>')
+            features_of_constraint[i, 3] = float(ct.RHS)
 
         # Pad with zeros for equal shapes
         var_feat_matrix = np.hstack([np.zeros((num_vars, features_of_constraint.shape[1])), features_of_var])

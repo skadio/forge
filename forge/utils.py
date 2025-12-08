@@ -2,11 +2,8 @@ import os
 import pickle
 from typing import Union, NamedTuple
 
-import gurobipy as gp
 import numpy as np
 import scipy.sparse as sp
-
-from forge.processor import MIPProcessor
 
 Num = Union[int, float]
 """Num type is defined as integer or float."""
@@ -16,6 +13,9 @@ class Constants(NamedTuple):
     """
     Constant values used by the modules.
     """
+
+    NUM_VARIABLE_FEATURES = 6
+    NUM_CONSTRAINT_FEATURES = 4
 
     # Forge Model Types
     FORGE_PRE_TRAIN = "forge_pretrain"
