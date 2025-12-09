@@ -31,23 +31,23 @@ from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, 
 
 class MIPInfo:
     """
-    Container for converted MIP instance data stored in PyG format.
+    Container for converted MIP instance data stored.
 
     Attributes
     ----------
     instance_name : Optional[str]
         Path or unique identifier of the MIP instance.
+    feature_tensor : Optional[torch.Tensor]
+        Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
+    num_cons : Optional[int]
+        Number of constraints in the original MIP.
+    num_vars : Optional[int]
+        Number of variables in the original MIP.
     edge_index : Optional[torch.LongTensor]
         PyG-style edge index tensor of shape (2, num_edges) representing graph connectivity.
         Row 0 = source indices, row 1 = target indices.
     edge_weight : Optional[torch.FloatTensor]
         Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
-    feature_tensor : Optional[torch.Tensor]
-        Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
-    num_cons : Optional[int]
-        Number of constraints in the original MIP. Prefix of `feature_tensor`
-    num_vars : Optional[int]
-        Number of variables in the original MIP. Suffix of `feature_tensor`
     """
 
     def __init__(self,
@@ -59,7 +59,6 @@ class MIPInfo:
 
         self.instance_name: Optional[str] = instance_name
         # self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
-        # TODO: what's the row,column of feature tensor? is it num_con + num_var, feat_dim=10?
         self.feature_tensor: Optional[torch.Tensor] = feature_tensor
         self.num_cons: Optional[int] = num_cons
         self.num_vars: Optional[int] = num_vars
@@ -260,6 +259,7 @@ class MIPProcessor:
 
         The produced MIPInfo contains:
         - `feature_tensor`: node features stacked with constraints first then variables.
+            Feature tensor shape: (num_cons + num_vars, feat_dim)
         - `num_cons`, `num_vars`: counts used to interpret the graph layout.
         - `edge_index`: PyG COO `(2, E)` connectivity for the bipartite graph where the first
           `num_cons` nodes are constraints and the next `num_vars` nodes are variables.
@@ -280,8 +280,7 @@ class MIPProcessor:
             or a populated MIPInfo on success.
         """
 
-        # TODO: this block needs some commentary explaining what is being done at a high level
-        # Is this needed because of relaxed instances?
+        # Remove zero-column variables (vars with no coefficients) to ensure valid bipartite graph
         to_remove = [v for v in mip_model.getVars() if not mip_model.getCol(v).size()]
         mip_model.remove(to_remove)
         mip_model.update()
@@ -295,49 +294,81 @@ class MIPProcessor:
             s = time.time()
 
         # Get feature tensor, number of constraints, and number of variables
+        # Feature tensor shape: (num_cons + num_vars, feat_dim)
         feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
         if is_debug:
             print("Feature Tensor Computed in ", time.time() - s, "seconds")
-
-        if is_debug:
             print("Creating PyG edge tensors")
             s = time.time()
 
-        # Get constraint matrix TODO comment on what's adj and coeff_adj
+        # Get coefficient matrix (sparse) and convert to dense (constraint, variable)
         coefficient_matrix = mip_model.getA().todense()
+
+        # Convert to binary adjacency, where any nonzero coefficient becomes `1`
+        # Edge presence between a constraint and a variable.
         A = (coefficient_matrix != 0).astype(int)
 
+        # Create full bipartite adjacency matrix
+        # top-left and bottom-right are zero blocks (no constraint-constraint or var-var edges)
+        # the off-diagonal blocks are `A` and `A.T` (constraint-variable edges).
+        # This produces a (num_cons+num_vars) × (num_cons+num_vars) adjacency matrix.
         adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
+
+        # Quit if adjacency is empty
         if adj is None or getattr(adj, "size", 0) == 0:
             return False
+
         # adj = normalize_adj(adj)
+
+        # Convert the dense adjacency to a CSR sparse matrix and then to COO format.
+        # In COO, we can access `.row` and `.col` arrays for graph edge construction (used for `edge_index`).
+        # COO format stands for "Coordinate List" format.
+        # COO a way to represent sparse matrices by storing only the non-zero entries and their coordinates (row/col)
+        # In COO format, a sparse matrix is described by three arrays:
+        #   row indices (i)
+        #   column indices (j)
+        #   values (v)
+        # Each entry (i[k], j[k], v[k]) means that the value v[k] is at position (i[k], j[k]) in the matrix.
         adj_sp = sp.csr_matrix(adj)
         adj_coo = adj_sp.tocoo()
 
-        # Decommission: Create DGL graph
-        # dgl_graph = dgl.graph((adj_coo.row, adj_coo.col))
-        # if not dgl_graph:
-        #     if is_debug:
-        #         print("WARNING: DGL returned false, MIPInfo is empty")
-        #     return MIPInfo()
-        # if is_debug:
-        #     print("Graph Created in ", time.time() - s, "seconds")
-
         # Create PyG edge_index (shape: 2 x num_edges)
+        # COO format so we can access the nonzero coordinates via `adj_coo.row` and `adj_coo.col`.
+        # np.array(..) builds a 2×E NumPy array where the first row is source node indices
+        #   and the second row is target node indices for every nonzero entry (E = number of edges / nonzeros).
+        # torch.tensor(..., dtype=torch.long)` converts that into a PyTorch LongTensor of shape `(2, E)`
+        # This is the PyG `edge_index` format (row 0 = sources, row 1 = targets).
+        # Long dtype is required because PyG uses these tensors for indexing.
         edge_index = torch.tensor(np.array([adj_coo.row, adj_coo.col]), dtype=torch.long)
 
-        # TODO should this block use coefficient_matrix or A?
+        # - np.block(...) constructs a dense block matrix with four blocks:
+        #   - top-left: zero matrix for constraint‑to‑constraint (size `num_cons x num_cons`)
+        #   - top-right: `coefficient_matrix` (constraint × variable)
+        #   - bottom-left: `coefficient_matrix.T` (variable × constraint)
+        #   - bottom-right: zero matrix for var‑to‑var (size `num_vars x num_vars`)
+        #  The resulting matrix represents the bipartite constraint_variable incidence,
+        #  But carrying the actual coefficients instead of 0/1.
         coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
                               [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
         coeff_adj_sp = sp.csr_matrix(coeff_adj)
         coeff_adj_coo = coeff_adj_sp.tocoo()
 
         # TODO: commentary explaining the normalization and edge weight computation
+        # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
+        # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
+        # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
         edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
+
+        # Apply min–max normalization to scale the weights into \[0,1\].
+        # epsilon is added to the denominator to avoid zero division when all values are (nearly) identical.
         edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
+        # Shift all weights up slightly so none are exactly zero
+        # (often useful if downstream code expects strictly positive weights).
         edge_weights += 1e-4
-        edge_weight = torch.FloatTensor(edge_weights) # needed for PyG
+        # Convert the NumPy array into a PyTorch FloatTensor to be used as per‑edge features in PyG
+        # `edge_weight` must align with `edge_index`
+        edge_weight = torch.FloatTensor(edge_weights)
 
         # Validate dimensions
         check_true(edge_index.shape[1] == edge_weight.shape[0],
@@ -345,8 +376,6 @@ class MIPProcessor:
                               f"edge_weight has {edge_weight.shape[0]} entries"))
 
         # Decommission DGL
-        # TODO so we are adding custom fields to the dgl graph here? Some comment would be helpful
-        # # TODO what's row/column of edge tensor? (after transpose?)
         # dgl_graph.ndata["feat"] = feature_tensor
         # dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
         #
@@ -354,11 +383,9 @@ class MIPProcessor:
         #            ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
         #                       f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
 
-        # TODO not sure why we are returning dgl_graph and feature_tensor separately since
-        # feature_tensor is already stored in dgl_graph.ndata["feat"]
-        # and by the same token, why MIPInfo does not have edge_tensor?
-        return MIPInfo(feature_tensor=feature_tensor, num_cons=num_cons, num_vars=num_vars, edge_index=edge_index,
-                       edge_weight=edge_weight)
+        return MIPInfo(feature_tensor=feature_tensor,
+                       num_cons=num_cons, num_vars=num_vars,
+                       edge_index=edge_index, edge_weight=edge_weight)
 
     @staticmethod
     def _get_feature_tensor_num_cons_num_vars(mip_model):
@@ -366,8 +393,9 @@ class MIPProcessor:
         Extract node-level features from a Gurobi model.
 
         The function produces a feature tensor where rows correspond to nodes:
-        first `num_cons` rows are constraint features, followed by `num_vars` rows
-        of variable features. Features are column-normalized to [0, 1].
+            - first `num_cons` rows are constraint features,
+            - followed by `num_vars` rows of variable features.
+        Features are column-normalized to [0, 1].
 
         Parameters
         ----------
@@ -405,8 +433,8 @@ class MIPProcessor:
             features_of_constraint[i, 3] = float(ct.RHS)
 
         # Pad with zeros for equal shapes
-        var_feat_matrix = np.hstack([np.zeros((num_vars, features_of_constraint.shape[1])), features_of_var])
         cons_feat_matrix = np.hstack([features_of_constraint, np.zeros((num_cons, features_of_var.shape[1]))])
+        var_feat_matrix = np.hstack([np.zeros((num_vars, features_of_constraint.shape[1])), features_of_var])
 
         # Stack up into one feature matrix, constraints come first
         feature_matrix = np.vstack([cons_feat_matrix, var_feat_matrix])
@@ -421,6 +449,25 @@ class MIPProcessor:
 
         # Return feature tensor, number of constraints, and number of variables
         return feature_tensor, num_cons, num_vars
+
+    @staticmethod
+    def _start_gurobi_env():
+        """
+        Initialize, start and return a Gurobi environment with output disabled.
+
+        Returns
+        -------
+        gp.Env
+            Configured Gurobi environment.
+        """
+        try:
+            from gurobi_onboarder import init_gurobi
+            gurobi_env, GUROBI_FOUND = init_gurobi.initialize_gurobi()
+        except Exception:
+            gurobi_env = gp.Env(empty=True)
+        gurobi_env.setParam("OutputFlag", 0)
+        gurobi_env.start()
+        return gurobi_env
 
     @staticmethod
     def get_only_mip_files(input_mip_folder: str, is_sort_by_size:bool = False) -> List[str]:
@@ -448,25 +495,6 @@ class MIPProcessor:
             mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
 
         return mip_filepaths
-
-    @staticmethod
-    def _start_gurobi_env():
-        """
-        Initialize, start and return a Gurobi environment with output disabled.
-
-        Returns
-        -------
-        gp.Env
-            Configured Gurobi environment.
-        """
-        try:
-            from gurobi_onboarder import init_gurobi
-            gurobi_env, GUROBI_FOUND = init_gurobi.initialize_gurobi()
-        except Exception:
-            gurobi_env = gp.Env(empty=True)
-        gurobi_env.setParam("OutputFlag", 0)
-        gurobi_env.start()
-        return gurobi_env
 
     @staticmethod
     def get_mip_items(input_mips):
