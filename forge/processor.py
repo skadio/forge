@@ -53,7 +53,8 @@ class MIPInfo:
     def __init__(self,
                  instance_name: str = None,
                  feature_tensor: Optional[torch.Tensor] = None,
-                 num_cons: int = None, num_vars: int = None,
+                 num_cons: int = None,
+                 num_vars: int = None,
                  edge_index: Optional[torch.Tensor] = None,
                  edge_weight: Optional[torch.Tensor] = None):
 
