@@ -179,8 +179,8 @@ class Forge(nn.Module):
         # Load default training parameters
         self.epochs: int = config.get('epochs')
         self.steps_per_instance: int = config.get('steps_per_instance')
-        self.learning_rate: float = config.get('learning_rate')
-        self.weight_decay: float = config.get('weight_decay')
+        self.learning_rate: float = float(config.get('learning_rate')) # cast 1e-4 as float! not scientific str
+        self.weight_decay: float = float(config.get('weight_decay')) # cast 1e-4 as float! not scientific str
         self.max_graph_nodes: int = config.get('max_graph_nodes')
 
         # Load seed
@@ -198,7 +198,7 @@ class Forge(nn.Module):
             self.updated_input_dim = self.input_dim
 
         # Set fields based on input parameters
-        self.dropout = nn.Dropout(dropout_ratio)
+        self.dropout = nn.Dropout(self.dropout_ratio)
 
         # Forge is initially not trained
         self.is_trained = False
@@ -232,7 +232,7 @@ class Forge(nn.Module):
         self.bn3 = nn.BatchNorm1d(self.updated_input_dim)
 
         # Node decoder
-        self.decoder_node = nn.Linear(self.updated_input_dim, input_dim)
+        self.decoder_node = nn.Linear(self.updated_input_dim, self.input_dim)
 
         # Edge decoders. Edges are decoded as product of two matrices
         self.decoder_edge_1 = nn.Linear(self.updated_input_dim, self.decoder_edge_dim)
