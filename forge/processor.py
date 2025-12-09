@@ -293,7 +293,7 @@ class MIPProcessor:
             print("Compute Feature Tensor")
             s = time.time()
 
-        # Get feature tensor, number of constraints, and number of variables
+        # Get static feature tensor from MIP, number of constraints, and number of variables
         # Feature tensor shape: (num_cons + num_vars, feat_dim)
         feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
@@ -302,86 +302,9 @@ class MIPProcessor:
             print("Creating PyG edge tensors")
             s = time.time()
 
-        # Get coefficient matrix (sparse) and convert to dense (constraint, variable)
-        coefficient_matrix = mip_model.getA().todense()
-
-        # Convert to binary adjacency, where any nonzero coefficient becomes `1`
-        # Edge presence between a constraint and a variable.
-        A = (coefficient_matrix != 0).astype(int)
-
-        # Create full bipartite adjacency matrix
-        # top-left and bottom-right are zero blocks (no constraint-constraint or var-var edges)
-        # the off-diagonal blocks are `A` and `A.T` (constraint-variable edges).
-        # This produces a (num_cons+num_vars) × (num_cons+num_vars) adjacency matrix.
-        adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
-
-        # Quit if adjacency is empty
-        if adj is None or getattr(adj, "size", 0) == 0:
-            return False
-
-        # adj = normalize_adj(adj)
-
-        # Convert the dense adjacency to a CSR sparse matrix and then to COO format.
-        # In COO, we can access `.row` and `.col` arrays for graph edge construction (used for `edge_index`).
-        # COO format stands for "Coordinate List" format.
-        # COO a way to represent sparse matrices by storing only the non-zero entries and their coordinates (row/col)
-        # In COO format, a sparse matrix is described by three arrays:
-        #   row indices (i)
-        #   column indices (j)
-        #   values (v)
-        # Each entry (i[k], j[k], v[k]) means that the value v[k] is at position (i[k], j[k]) in the matrix.
-        adj_sp = sp.csr_matrix(adj)
-        adj_coo = adj_sp.tocoo()
-
-        # Create PyG edge_index (shape: 2 x num_edges)
-        # COO format so we can access the nonzero coordinates via `adj_coo.row` and `adj_coo.col`.
-        # np.array(..) builds a 2×E NumPy array where the first row is source node indices
-        #   and the second row is target node indices for every nonzero entry (E = number of edges / nonzeros).
-        # torch.tensor(..., dtype=torch.long)` converts that into a PyTorch LongTensor of shape `(2, E)`
-        # This is the PyG `edge_index` format (row 0 = sources, row 1 = targets).
-        # Long dtype is required because PyG uses these tensors for indexing.
-        edge_index = torch.tensor(np.array([adj_coo.row, adj_coo.col]), dtype=torch.long)
-
-        # - np.block(...) constructs a dense block matrix with four blocks:
-        #   - top-left: zero matrix for constraint‑to‑constraint (size `num_cons x num_cons`)
-        #   - top-right: `coefficient_matrix` (constraint × variable)
-        #   - bottom-left: `coefficient_matrix.T` (variable × constraint)
-        #   - bottom-right: zero matrix for var‑to‑var (size `num_vars x num_vars`)
-        #  The resulting matrix represents the bipartite constraint_variable incidence,
-        #  But carrying the actual coefficients instead of 0/1.
-        coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
-                              [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
-        coeff_adj_sp = sp.csr_matrix(coeff_adj)
-        coeff_adj_coo = coeff_adj_sp.tocoo()
-
-        # TODO: commentary explaining the normalization and edge weight computation
-        # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
-        # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
-        # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
-        edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
-
-        # Apply min–max normalization to scale the weights into \[0,1\].
-        # epsilon is added to the denominator to avoid zero division when all values are (nearly) identical.
-        edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
-        # Shift all weights up slightly so none are exactly zero
-        # (often useful if downstream code expects strictly positive weights).
-        edge_weights += 1e-4
-        # Convert the NumPy array into a PyTorch FloatTensor to be used as per‑edge features in PyG
-        # `edge_weight` must align with `edge_index`
-        edge_weight = torch.FloatTensor(edge_weights)
-
-        # Validate dimensions
-        check_true(edge_index.shape[1] == edge_weight.shape[0],
-                   ValueError(f"Error: edge_index has {edge_index.shape[1]} edges but "
-                              f"edge_weight has {edge_weight.shape[0]} entries"))
-
-        # Decommission DGL
-        # dgl_graph.ndata["feat"] = feature_tensor
-        # dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
-        #
-        # check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
-        #            ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
-        #                       f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
+        # Get edge indexes and weights in Tensor, ready for PyG
+        edge_index, edge_weight = MIPProcessor._get_edge_index_weight(mip_model, num_cons, num_vars)
+        # edge_index, edge_weight = MIPProcessor._old_get_edge_index_weight(mip_model, num_cons, num_vars, is_debug)
 
         return MIPInfo(feature_tensor=feature_tensor,
                        num_cons=num_cons, num_vars=num_vars,
@@ -516,3 +439,137 @@ class MIPProcessor:
                 raise ValueError(
                     f"Error: Input {item!r} is neither a directory, a file, nor a gurobipy model instance.")
         return mip_items
+
+    @staticmethod
+    def _get_edge_index_weight(mip_model, num_cons, num_vars):
+        # coefficient_matrix is sparse, getA returns a scipy.sparse.csr_matrix
+        coef_sp = mip_model.getA()
+
+        # create empty sparse blocks
+        top_left = sp.csr_matrix((num_cons, num_cons))
+        bottom_right = sp.csr_matrix((num_vars, num_vars))
+        coeff_adj_sp = sp.bmat([[top_left, coef_sp], [coef_sp.transpose(), bottom_right]], format='coo')
+        # then the old coeff_adj_coo = coeff_adj_sp  # already COO if format='coo'
+        edge_index = torch.tensor(np.vstack([coeff_adj_sp.row, coeff_adj_sp.col]), dtype=torch.long)
+        edge_weights = torch.FloatTensor(coeff_adj_sp.data)
+        edge_weights_np = coeff_adj_sp.data.astype(float)
+
+        # Normalize edge weights
+        edge_weight = MIPProcessor._normalize_edge_weights(edge_weights_np)
+
+        # Validate dimensions
+        check_true(edge_index.shape[1] == edge_weight.shape[0],
+                   ValueError(f"Error: edge_index has {edge_index.shape[1]} edges but "
+                              f"edge_weight has {edge_weight.shape[0]} entries"))
+
+        return edge_index, edge_weight
+
+    @staticmethod
+    def _old_get_edge_index_weight(cls, mip_model, num_cons, num_vars):
+        # Get coefficient matrix (sparse) and convert to dense (constraint, variable)
+        coefficient_matrix = mip_model.getA().todense()
+
+        # Convert to binary adjacency, where any nonzero coefficient becomes `1`
+        # Edge presence between a constraint and a variable.
+        A = (coefficient_matrix != 0).astype(int)
+
+        # Create full bipartite adjacency matrix
+        # top-left and bottom-right are zero blocks (no constraint-constraint or var-var edges)
+        # the off-diagonal blocks are `A` and `A.T` (constraint-variable edges).
+        # This produces a (num_cons+num_vars) × (num_cons+num_vars) adjacency matrix.
+        adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
+
+        # Quit if adjacency is empty
+        if adj is None or getattr(adj, "size", 0) == 0:
+            return False
+
+        # adj = normalize_adj(adj)
+
+        # Convert the dense adjacency to a CSR sparse matrix and then to COO format.
+        # In COO, we can access `.row` and `.col` arrays for graph edge construction (used for `edge_index`).
+        # COO format stands for "Coordinate List" format.
+        # COO a way to represent sparse matrices by storing only the non-zero entries and their coordinates (row/col)
+        # In COO format, a sparse matrix is described by three arrays:
+        #   row indices (i)
+        #   column indices (j)
+        #   values (v)
+        # Each entry (i[k], j[k], v[k]) means that the value v[k] is at position (i[k], j[k]) in the matrix.
+        adj_sp = sp.csr_matrix(adj)
+        adj_coo = adj_sp.tocoo()
+
+        # Create PyG edge_index (shape: 2 x num_edges)
+        # COO format so we can access the nonzero coordinates via `adj_coo.row` and `adj_coo.col`.
+        # np.array(..) builds a 2×E NumPy array where the first row is source node indices
+        #   and the second row is target node indices for every nonzero entry (E = number of edges / nonzeros).
+        # torch.tensor(..., dtype=torch.long)` converts that into a PyTorch LongTensor of shape `(2, E)`
+        # This is the PyG `edge_index` format (row 0 = sources, row 1 = targets).
+        # Long dtype is required because PyG uses these tensors for indexing.
+        edge_index = torch.tensor(np.array([adj_coo.row, adj_coo.col]), dtype=torch.long)
+
+        # - np.block(...) constructs a dense block matrix with four blocks:
+        #   - top-left: zero matrix for constraint‑to‑constraint (size `num_cons x num_cons`)
+        #   - top-right: `coefficient_matrix` (constraint × variable)
+        #   - bottom-left: `coefficient_matrix.T` (variable × constraint)
+        #   - bottom-right: zero matrix for var‑to‑var (size `num_vars x num_vars`)
+        #  The resulting matrix represents the bipartite constraint_variable incidence,
+        #  But carrying the actual coefficients instead of 0/1.
+        coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
+                              [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
+        coeff_adj_sp = sp.csr_matrix(coeff_adj)
+        coeff_adj_coo = coeff_adj_sp.tocoo()
+
+        # TODO: commentary explaining the normalization and edge weight computation
+        # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
+        # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
+        # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
+        edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
+
+        # Apply min–max normalization to scale the weights into \[0,1\].
+        # epsilon is added to the denominator to avoid zero division when all values are (nearly) identical.
+        edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
+        # Shift all weights up slightly so none are exactly zero
+        # (often useful if downstream code expects strictly positive weights).
+        edge_weights += 1e-4
+        # Convert the NumPy array into a PyTorch FloatTensor to be used as per‑edge features in PyG
+        # `edge_weight` must align with `edge_index`
+        edge_weight = torch.FloatTensor(edge_weights)
+
+        # Decommission DGL
+        # dgl_graph.ndata["feat"] = feature_tensor
+        # dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
+        #
+        # check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
+        #            ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
+        #                       f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
+
+        return edge_index, edge_weight
+
+    @staticmethod
+    def _normalize_edge_weights(edge_weights: Optional[np.ndarray],
+                               eps: float = 1e-12,
+                               small_eps: float = 1e-4) -> torch.FloatTensor:
+        """
+        Normalize edge weights using the small-eps-only strategy.
+
+        - If `edge_weights` is empty or None, returns an empty FloatTensor.
+        - If max - min < eps, sets all weights to `small_eps`.
+        - Otherwise performs min-max normalization and adds `small_eps` to avoid exact zeros.
+
+        Returns a `torch.FloatTensor`.
+        """
+        if edge_weights is None:
+            return torch.FloatTensor(np.array([], dtype=float))
+
+        arr = np.asarray(edge_weights, dtype=float)
+        if arr.size == 0:
+            return torch.FloatTensor(arr)
+
+        minv = arr.min()
+        maxv = arr.max()
+        if maxv - minv < eps:
+            out = np.full_like(arr, small_eps, dtype=float)
+        else:
+            out = (arr - minv) / (maxv - minv)
+            out = out + small_eps
+
+        return torch.FloatTensor(out)
