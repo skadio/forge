@@ -354,6 +354,7 @@ class Forge(nn.Module):
         h_list.append(h)
 
         # The same "embedding" is then passed into the vector quantizer below
+        # TODO PyG vq does not return these 5 things..
         quantized, _, commit_loss, dist, codebook = self.vq(h)
         quantized_node = self.decoder_node(quantized)
         quantized_edge_1 = self.decoder_edge_1(quantized)
