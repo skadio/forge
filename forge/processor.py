@@ -26,7 +26,7 @@ import yaml
 from sympy.combinatorics import Coset
 from tqdm import tqdm
 
-from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
+from utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
 
 
 class MIPInfo:
@@ -181,12 +181,16 @@ class MIPProcessor:
         # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_mip_files))):
-
+            
             # Read MIP file to a Gurobi model
             mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
 
             # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-            mipinfo = self._mip_model_to_mipinfo(mip_model)
+            try:
+                mipinfo = self._mip_model_to_mipinfo(mip_model)
+            except Exception as e:
+                print(f"Warning: Failed to convert MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
+                continue
             mipinfo.instance_name = sorted_mip_files[idx]
             mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
@@ -413,7 +417,10 @@ class MIPProcessor:
 
         all_filenames = os.listdir(input_mip_folder)
         all_filepaths = [os.path.join(input_mip_folder, filename) for filename in all_filenames]
-        mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or p.lower().endswith('.lp')]
+        mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or
+                          p.lower().endswith('.lp') or 
+                          p.lower().endswith('.mps.gz') or 
+                          p.lower().endswith('.lp.gz')]
 
         if is_sort_by_size:
             mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)

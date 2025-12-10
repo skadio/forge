@@ -18,9 +18,7 @@ from torch_geometric.nn import SAGEConv
 
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
-from forge.utils import check_true, Constants, overwrite_if_given
-# TODO consider update to vector-quantize-pytorch to remove code copy to a fix/static version
-# from vqgraph.vq import VectorQuantize
+from forge.utils import EdgeWeightedSAGEConv, blockwise_loss, check_true, Constants, overwrite_if_given
 from vector_quantize_pytorch import VectorQuantize
 
 class Forge(nn.Module):
@@ -169,7 +167,6 @@ class Forge(nn.Module):
         self.is_eval_mode: bool = overwrite_if_given(config.get('is_eval_mode'), is_eval_mode)
 
         # Load additional parameters
-        # TODO should these also be in __init__ input to overwrite as above? Seems "fixed", no need to overwrite?
         self.graph_sage_aggregation: str = config.get('graph_sage_aggregation')
         self.decoder_edge_dim: int = config.get('decoder_edge_dim')
         self.vq_decay: float = config.get('vq_decay')
@@ -191,9 +188,10 @@ class Forge(nn.Module):
         self.has_variable_proba_head: bool = False
 
         # Update input dim if needed
-        # TODO when/why would this happen? some commentary?
+        # If input_dim < hidden_dim, we project to hidden_dim first
         if self.input_dim < self.hidden_dim:
             self.updated_input_dim = self.hidden_dim
+        # If input_dim >= hidden_dim, we can use input_dim directly
         else:
             self.updated_input_dim = self.input_dim
 
@@ -218,8 +216,12 @@ class Forge(nn.Module):
 
         # PyG SAGEConv doesn't take activation in constructor
         # PyG delegates activation to the code rather than embedding it in the layer.
-        self.graph_layer_1: SAGEConv = SAGEConv(self.input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
-        self.graph_layer_2: SAGEConv = SAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
+        # self.graph_layer_1: SAGEConv = SAGEConv(self.input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
+        # self.graph_layer_2: SAGEConv = SAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
+
+        # Modified GraphSAGE to accept edge weights
+        self.graph_layer_1 = EdgeWeightedSAGEConv(self.input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
+        self.graph_layer_2 = EdgeWeightedSAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
 
         # Linear layers
         self.linear = nn.Linear(self.updated_input_dim, self.updated_input_dim)
@@ -328,7 +330,7 @@ class Forge(nn.Module):
 
         # Decommission: DGL GraphSAGE Layer 1
         # h = self.graph_layer_1(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
-        h = self.graph_layer_1(h, edge_index) # PyG SAGEConv does not accept edge_weight directly
+        h = self.graph_layer_1(h, edge_index, edge_weight=edge_weight)
         h = self.activation(h)  # PyG needs explicit activation
         h = self.bn1(h)
         if self.norm_type != "none":
@@ -337,7 +339,7 @@ class Forge(nn.Module):
 
         # Decommission: DGL GraphSAGE Layer 2
         # h = self.graph_layer_2(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
-        h = self.graph_layer_2(h, edge_index) # PyG SAGEConv does not accept edge_weight directly
+        h = self.graph_layer_2(h, edge_index, edge_weight=edge_weight)
         h = self.activation(h) # PyG needs explicit activation
         h = self.bn2(h)
         h = self.dropout(h)
@@ -348,8 +350,7 @@ class Forge(nn.Module):
         h = self.bn3(h)
         h = self.dropout(h)
 
-        # Save output at this stage TODO: i don't see a "save" here?
-
+        # Store output at this stage into h_list
         # This is going to be our "embedding" of the input graph
         h_list.append(h)
 
@@ -375,15 +376,13 @@ class Forge(nn.Module):
             # Decommission: Get Adjacency Matrix from DGL Graph
             # adj = dgl_graph.adjacency_matrix().to_dense().to(feature_tensor.device)
 
-            # Convert PyG edge_index to dense adjacency matrix
+            # Convert PyG edge_index to dense adjacency matrix on CPU
             num_nodes = num_cons + num_vars
-            adj = torch.zeros((num_nodes, num_nodes), device=feature_tensor.device)
+            adj = torch.zeros((num_nodes, num_nodes), device="cpu")
 
-            # Ensure edge_index and edge_weight are on the same device
-            ei = edge_index.to(feature_tensor.device)
+            ei = edge_index.to("cpu")
             if edge_weight is not None:
-                ew = edge_weight.to(feature_tensor.device)
-                # advanced indexing assigns per-edge weights
+                ew = edge_weight.to("cpu")
                 adj[ei[0], ei[1]] = ew
             else:
                 adj[ei[0], ei[1]] = 1.0
@@ -391,27 +390,14 @@ class Forge(nn.Module):
             # Reconstruction Loss (other losses are calculated in training code)
             feature_rec_loss = self.lambda_node * F.mse_loss(feature_tensor, quantized_node)
 
-            adj_quantized_1 = torch.matmul(quantized_edge_1, quantized_edge_1.t())
-            adj_quantized_2 = torch.matmul(quantized_edge_2, quantized_edge_2.t())
-
-            adj_quantized = torch.matmul(adj_quantized_1, adj_quantized_2.T)
-
-            # Min Max Rescaling of Adjacency Matrix
-            # TODO: is there division by zero risk here?
-            adj_quantized = (adj_quantized - adj_quantized.min()) / (adj_quantized.max() - adj_quantized.min())
-
-            # Look Only at The Bipartite Part of the Graph
-            adj = adj[num_cons:, :num_cons]
-            adj_quantized = adj_quantized[num_cons:, :num_cons]
-
-            # Higher Penalty for Not Recreating Positive Edges
-            edge_scale = adj * 1
-            diff = torch.square(adj - adj_quantized)
-            diff *= edge_scale
-
-            pos_edge_rec_loss = self.lambda_edge * torch.mean(diff)
-            edge_rec_loss = self.lambda_edge * torch.sqrt(F.mse_loss(adj, adj_quantized))
-            edge_rec_loss += pos_edge_rec_loss
+            # Edge reconstruction loss on bipartite block, computed in blocks to allow running larger graphs
+            edge_rec_loss = blockwise_loss(self,
+                                           quantized_edge_1,
+                                           quantized_edge_2,
+                                           adj,
+                                           num_cons, 
+                                           lambda_edge=self.lambda_edge,
+                                           batch_size=1024)
 
         # Distance Matrix - Distance From Each Node's Embedding to Each Code in the Codebook
         dist = torch.squeeze(dist)
@@ -439,17 +425,14 @@ class Forge(nn.Module):
             return
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # TODO Claude says: Rebinding self inside method is misleading but harmless;
-        #  prefer self.to(device) (which is in-place for modules) without reassigning local self.
-        self = self.to(device)
+        self.to(device)
 
         if model_type == Constants.FORGE_PRE_TRAIN:
             self.has_integral_gap_head = False
             self.has_variable_proba_head = False
         elif model_type == Constants.FORGE_FINE_TUNE_INTEGRAL_GAP:
-            # TODO why are we setting both to true for integral gap??
             self.has_integral_gap_head = True
-            self.has_variable_proba_head = True
+            self.has_variable_proba_head = False
         elif model_type == Constants.FORGE_FINE_TUNE_VARIABLE_PROBA:
             self.has_integral_gap_head = False
             self.has_variable_proba_head = True
@@ -527,8 +510,7 @@ class Forge(nn.Module):
 
             # MIP instances in dataset
             loss = None
-            # TODO why is this starting from idx 10? are we skipping the first 10 instances?
-            for idx in range(10, len(input_mipinfo_list)):
+            for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
 
@@ -551,9 +533,6 @@ class Forge(nn.Module):
                                                                               mipinfo.num_cons, mipinfo.num_vars,
                                                                               edge_index, edge_weight)
 
-                    # TODO Claude says: This works but is unconventional.
-                    # The gradient from the previous step is cleared after the forward pass of the current step,
-                    # which is fine but could confuse maintainers
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
@@ -644,11 +623,10 @@ class Forge(nn.Module):
 
         # Compute mip instance vector, as a frequency distribution of codes assigned to constraints and variables
         assigned_codes = torch.argmin(distances, axis=1).detach().cpu().numpy()
-        instance_embedding = np.zeros(self.codebook_size, )
-        for c in assigned_codes:
-            instance_embedding[c] += 1
-        # TODO possible to speed up using:
-        #   instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
+        # instance_embedding = np.zeros(self.codebook_size, )
+        # for c in assigned_codes:
+        #     instance_embedding[c] += 1
+        instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
 
         embedding_of_constraint = h_list[1][:mipinfo.num_cons]
         embedding_of_variable = h_list[1][mipinfo.num_cons:]
@@ -661,6 +639,7 @@ class Forge(nn.Module):
 
     def _finetune_integral_gap(self,
                                input_mip_to_gapinfo: Dict[str, GapInfo],
+                               input_forge_pretrained_pkl: str,
                                output_forge_finetuned_pkl : str,
                                epochs: Optional[int] = None, #10,
                                steps_per_instance: Optional[int] = None, # 10,
@@ -674,6 +653,8 @@ class Forge(nn.Module):
         ----------
         input_mip_to_gapinfo : Dict[str, GapInfo]
             Dictionary mapping MIP file paths to their GapInfo objects containing LP/MIP solutions.
+        input_forge_pretrained_pkl : str
+            Path to the pre-trained Forge model state_dict.
         output_forge_finetuned_pkl : str
             Path to save the fine-tuned model state_dict.
         epochs : Optional[int], default=None
@@ -698,20 +679,24 @@ class Forge(nn.Module):
         weight_decay = overwrite_if_given(self.weight_decay, weight_decay)
         max_graph_nodes = overwrite_if_given(self.max_graph_nodes, max_graph_nodes)
 
-        # TODO in pretraining() we have these --needed here?
-        # super().train()
-        # self.to(self.device)
-
-        # TODO comment on this block for why was this needed? Removing now?
-        # copy_params(old_model=pre_trained, new_model=self)
-        # del pre_trained
-
-        # TODO comment on this block for why was this needed?
-        torch.cuda.empty_cache()
-
+        # Set model to training mode and move to device
+        self.to(self.device)
         self.train()
 
-        # TODO: weight decay is set to 5e-4 for fine-tuning vs. 1e-4 in pretraining typo? intentional?
+        if self.is_trained == True and self.has_integral_gap_head == False:
+            print("Warning: Forge model has been pre-trained but missing integral gap head, adding head.")
+            self.has_integral_gap_head = True
+            self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
+            
+            pre_trained = Forge()
+            pre_trained.load_model(input_forge_pretrained_pkl, model_type=Constants.FORGE_PRE_TRAIN)
+
+            copy_params(old_model = pre_trained, new_model = self)
+            del pre_trained
+
+            # Ensure old model is deleted from memory
+            torch.cuda.empty_cache()
+
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
         # Start Gurobi environment
@@ -722,7 +707,6 @@ class Forge(nn.Module):
         for epoch in range(epochs):
 
             epoch_loss = []
-            bce_epoch_loss = []
             gap_epoch_loss = []
 
             for idx, mip in enumerate(mips):
@@ -749,57 +733,43 @@ class Forge(nn.Module):
 
                 for step in range(steps_per_instance):
 
-                    # TODO we did not have this in pretraining() --needed here? comment
                     optimizer.zero_grad()
 
                     # Compute loss and prediction
                     h_list, logits, loss, distances, codebook_ = self.forward(feature_tensor, mipinfo.num_cons,
                                                                               mipinfo.num_vars, edge_index, edge_weight)
                     # Predict gap ratio
-                    # TODO what's the magic -1? (layer?)
+                    # h_list[-1] is the integral gap head output
                     gap_ratio_pred = torch.mean(h_list[-1][mipinfo.num_cons:, :])
                     gap_ratio_true = input_mip_to_gapinfo[mip].gap_ratio
 
-                    # TODO comment here
-                    # Claude says: This flips ratios > 1, but the prediction head uses sigmoid (outputs 0-1).
-                    #              If training data has mixed problem types, this creates inconsistent targets.
+                    # Make larger gaps >1 appear as small ratios (for both minimization and maximization)
                     if gap_ratio_true > 1:
                         gap_ratio_true = 1 / gap_ratio_true
 
-                    # TODO why are we predicting both gap ratio and variable probabilities here?
-                    # TODO what's the magic -2? (layer?)
+
+                    # Comment out - optional variable probability head
                     # Predict variable probabilities
-                    var_proba_pred = h_list[-2][mipinfo.num_cons:, :]
-                    var_proba_truth = torch.Tensor(input_mip_to_gapinfo[mip].mip_sol).to(self.device)
+                    # var_proba_pred = h_list[-2][mipinfo.num_cons:, :]
+                    # var_proba_truth = torch.Tensor(input_mip_to_gapinfo[mip].mip_sol).to(self.device)
+                    
 
                     try:
-                        gap_loss = torch.abs(gap_ratio_pred - gap_ratio_true)
-                        # TODO Note: mip_sol contains variable values from MIP solutions,
-                        # which may not be binary (e.g., integer variables 0-10, or continuous variables).
-                        # BCE requires targets in [0,1].
-                        # Fix: restrict BCE head training to binary variables only,
-                        # or normalize/clip targets into [0,1] and use appropriate losses for non-binary variables.
-                        bce_loss = F.binary_cross_entropy(var_proba_pred.flatten(), var_proba_truth.flatten())
-
-                        # TODO comment on weighting here?
-                        loss = gap_loss + (0.01 * bce_loss)
+                        loss = torch.abs(gap_ratio_pred - gap_ratio_true)
                         loss.backward()
                         optimizer.step()
 
                         print('', '(', idx, '/', len(mips), ') |', mip,
-                              ' | GAP Loss :', gap_loss.item(),
-                              'BCE Loss :', bce_loss.item(), end='\r')
+                              ' | GAP Loss :', loss.item(), end='\r')
 
                         epoch_loss.append(loss.item())
-                        bce_epoch_loss.append(bce_loss.item())
-                        gap_epoch_loss.append(gap_loss.item())
+                        gap_epoch_loss.append(loss.item())
                     except:
                         continue
 
             print("\nEpoch ", epoch + 1,
                   "| Means | Loss : ", np.mean(epoch_loss),
-                  "| Gap Loss : ", np.mean(gap_epoch_loss),
-                  "| BCE Loss : ", np.mean(bce_epoch_loss))
+                  "| Gap Loss : ", np.mean(gap_epoch_loss))
             print()
 
             torch.save(self.state_dict(), output_forge_finetuned_pkl)
@@ -850,8 +820,7 @@ class Forge(nn.Module):
             raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
 
         # Ensure module is in evaluation mode and on device
-        # TODO this is used in get mip_embeddings but not get primal gap? is it not needed?
-        # self.eval()
+        self.eval()
 
         # Store Forge eval mode (to restore back) and set to eval only to generate embedding
         original_mode = self.is_eval_mode
@@ -872,7 +841,6 @@ class Forge(nn.Module):
         variable_proba = h_list[-2][mipinfo.num_cons:]
         integral_gap = h_list[-1][mipinfo.num_cons:]
 
-        # TODO what's this exactly? is this the predicted gap ratio?
         gap_ratio = torch.mean(integral_gap).item()
 
         # Read and solve the LP relaxation to generate initial objective value
@@ -881,21 +849,22 @@ class Forge(nn.Module):
         lp_obj = lp_model.ObjVal
         lp_sol = lp_model.Xn
 
-        # TODO consider generalizing/removing in future
-        # Add a buffer to the ratio to make sure we are not infeasible
-        mip_obj = lp_obj
-        if problem_type in ['SC']:
-            gap_ratio += (0.02 * gap_ratio)
-            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
-        elif problem_type in ['MVC']:
-            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
-        elif problem_type in ['GISP']:
-            gap_ratio += (0.2 * gap_ratio)
-            mip_obj = lp_obj * gap_ratio
-        elif problem_type in ['CA']:
-            gap_ratio += (0.05 * gap_ratio)
-            mip_obj =lp_obj * gap_ratio
+        # Small safety margin to the ratio to make sure we are not infeasible
+        SAFETY_EPS = 0.05
+        MIN_PROBLEMS = {"SC", "MVC"}   
+        MAX_PROBLEMS = {"GISP", "CA"}         
 
+        if problem_type in MIN_PROBLEMS:
+            # Minimization: interpret gap_ratio as “how close MIP is to LP”
+            gap_ratio += (SAFETY_EPS * gap_ratio)
+            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
+
+        elif problem_type in MAX_PROBLEMS:
+            # Maximization: interpret gap_ratio as mip_obj / lp_obj in (0, 1]
+            gap_ratio += (SAFETY_EPS * gap_ratio)
+            mip_obj = lp_obj * gap_ratio
+
+        
         # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
         gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
 

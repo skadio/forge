@@ -64,19 +64,18 @@ class MIPLabeler:
             mip_sol = mip_model.Xn
 
             # Calculate ratio (handle zero division)
-            # TODO does this assume minimization? mip_model.ModelSense
             # For minimization, LP ≤ MIP, so ratio = lp_obj / mip_obj.
             # For maximization, LP ≥ MIP, so ratio = mip_obj / lp_obj.
-            min_val = min(mip_obj, lp_obj)
-            max_val = max(mip_obj, lp_obj)
-            ratio = 1.0 if max_val == 0 else min_val / max_val
+            if mip_model.ModelSense == gp.GRB.MINIMIZE:
+                ratio = 1.0 if mip_obj == 0 else lp_obj / mip_obj
+            else:  # maximization
+                ratio = 1.0 if lp_obj == 0 else mip_obj / lp_obj
 
             print("\rInstance : ", idx, "| Ratio : ", ratio, end='')
 
             # Store gap information
             mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
 
-        # TODO in original code, this is indented incorrectly? it was inside the for-loop above
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
 
         gurobi_env.close()

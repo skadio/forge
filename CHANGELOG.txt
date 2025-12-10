@@ -6,3 +6,83 @@ CHANGELOG
 November 26, 2025 0.0.1
 -------------------------------------------------------------------------------
 Initial development start. Unstable version.
+
+
+
+-------------------------------------------------------------------------------
+December 9, 2025 0.0.1
+-------------------------------------------------------------------------------
+labeler.py
+
+	# TODO does this assume minimization? mip_model.ModelSense
+    # For minimization, LP ≤ MIP, so ratio = lp_obj / mip_obj.
+    # For maximization, LP ≥ MIP, so ratio = mip_obj / lp_obj.
+
+    The ratio is calculated as min_val / max_val - this will by default get the correct ratios for minimization / maximiazation problems. I changed the code to make more explicit. 
+
+	# TODO in original code, this is indented incorrectly? it was inside the for-loop above
+
+	Yes, I did that to write a pickle file every pass of the loop cuz sometimes sagemaker would die on its own and I would want the intermediate files so I could restart from there. For the final version, its fine if its outside the for-loop
+
+
+utils.py 
+	Added custom class to use message passing in pytorch geometric with edge weights
+
+embedding.py
+
+	# TODO consider update to vector-quantize-pytorch to remove code copy to a fix/static version
+	Done 
+
+    # TODO should these also be in __init__ input to overwrite as above? Seems "fixed", no need to overwrite?
+    I generally prefer being able to change params in init as opposed to file but thats mostly during experimentation. I'm okay with either for this. 
+
+    # Save output at this stage TODO: i don't see a "save" here?
+    The save is writing to the h_list given by h_list.append(h). I chnaged the wording in the comments 
+
+    # TODO: is there division by zero risk here?
+    I added + 1e-6 in the denominator to be safe 
+
+    # TODO why are we setting both to true for integral gap??
+    Aah I think I trained sequentially, first was prob head then gap. Can turn off the prob head. 
+
+    # TODO why is this starting from idx 10? are we skipping the first 10 instances?
+    I sorted MIPLIB by size and the smallest 10 were too tiny to do anything useful with. I changed this now since it is general to any dataset 
+
+    # TODO possible to speed up using:
+        instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
+    Oh I like this! 
+
+    _finetune_integral_gap
+	    # TODO in pretraining() we have these --needed here?
+	    # TODO comment on this block for why was this needed? Removing now?
+	    
+	    This is needed because the pretrained model might not have prediction heads. So the copy_params model will copy over the shared paraeters to initialize the architecture that also includes the prediction heads. 
+
+        # TODO: weight decay is set to 5e-4 for fine-tuning vs. 1e-4 in pretraining typo? intentional?
+        Both work, I think I was playing around with both 
+
+        # TODO we did not have this in pretraining() --needed here? comment
+                            optimizer.zero_grad()
+
+        Yes, every training loop you need to run zero_grad()
+
+        # TODO what's the magic -1? (layer?)
+        I commented this in, its the prediction head 
+
+        # TODO why are we predicting both gap ratio and variable probabilities here?
+        # TODO what's the magic -2? (layer?)
+        Not needed, I commented out
+
+_mip_model_to_gapinfo
+		# TODO this is used in get mip_embeddings but not get primal gap? is it not needed?
+        self.eval()
+
+        Regardless, you always want model to be in eval mode so dropout and batchnorm are fixed. 
+
+
+        # TODO what's this exactly? is this the predicted gap ratio?
+        Yes, just a ratio between 0-1 
+
+Other:
+	Changed function calls to reflect updated GNN call
+
