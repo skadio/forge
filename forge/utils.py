@@ -245,7 +245,7 @@ def blockwise_loss(self,
         block_two = quantized_two[start:end, :].to(device)
         recon_block_two = block_two @ block_two[:num_cons, :].T
 
-        recon_block = recon_block @ recon_block_two
+        recon_block = recon_block @ recon_block_two.T
 
         # Min-max rescaling per block to [0, 1]
         block_min = recon_block.min()

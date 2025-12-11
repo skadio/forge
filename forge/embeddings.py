@@ -16,9 +16,9 @@ from torch_geometric.nn import SAGEConv
 # Bipartite Graphs: PyG requires explicit edge index tuples
 
 
-from forge.labeler import MIPLabeler, GapInfo
-from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
-from forge.utils import EdgeWeightedSAGEConv, blockwise_loss, check_true, Constants, overwrite_if_given
+from labeler import MIPLabeler, GapInfo
+from processor import MIPInfo, MIPEmbeddings, MIPProcessor
+from utils import EdgeWeightedSAGEConv, blockwise_loss, check_true, Constants, overwrite_if_given
 from vector_quantize_pytorch import VectorQuantize
 
 class Forge(nn.Module):
@@ -196,7 +196,7 @@ class Forge(nn.Module):
             self.updated_input_dim = self.input_dim
 
         # Set fields based on input parameters
-        self.dropout = nn.Dropout(dropout_ratio)
+        self.dropout = nn.Dropout(float(dropout_ratio))
 
         # Forge is initially not trained
         self.is_trained = False
@@ -355,7 +355,16 @@ class Forge(nn.Module):
         h_list.append(h)
 
         # The same "embedding" is then passed into the vector quantizer below
-        quantized, _, commit_loss, dist, codebook = self.vq(h)
+        # quantized, _, commit_loss, dist, codebook = self.vq(h)
+        quantized, indices, commit_loss = self.vq(h)
+
+        codebook = self.vq.codebook   # or from the forward output
+
+        # Squared Euclidean distances: [N, K]
+        x_norm = (h ** 2).sum(dim=-1, keepdim=True)        # [N, 1]
+        c_norm = (codebook ** 2).sum(dim=-1).unsqueeze(0)  # [1, K]
+        distances = x_norm + c_norm - 2 * h @ codebook.t() # [N, K]
+
         quantized_node = self.decoder_node(quantized)
         quantized_edge_1 = self.decoder_edge_1(quantized)
         quantized_edge_2 = self.decoder_edge_2(quantized)
@@ -400,7 +409,7 @@ class Forge(nn.Module):
                                            batch_size=1024)
 
         # Distance Matrix - Distance From Each Node's Embedding to Each Code in the Codebook
-        dist = torch.squeeze(dist)
+        dist = torch.squeeze(distances)
 
         h_list.append(quantized)
         h_list.append(quantized_node)
