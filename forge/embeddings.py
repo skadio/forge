@@ -19,7 +19,6 @@ from torch_geometric.nn import SAGEConv
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given
-# TODO consider update to vector-quantize-pytorch to remove code copy to a fix/static version
 # from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
@@ -63,6 +62,7 @@ class Forge(nn.Module):
                 parameters documented below.
             input_dim : int, default=10
                 Dimensionality of the raw node features provided in `feats` during `forward`.
+                Also called feat_dim in some contexts.
                 If `input_dim < hidden_dim` the models internally projects to `hidden_dim`
                     (stored as `updated_input_dim`) to allow a wider first hidden representation;
                 Otherwise, it keeps the original size.
@@ -191,11 +191,7 @@ class Forge(nn.Module):
         self.has_variable_proba_head: bool = False
 
         # Update input dim if needed
-        # TODO when/why would this happen? some commentary?
-        if self.input_dim < self.hidden_dim:
-            self.updated_input_dim = self.hidden_dim
-        else:
-            self.updated_input_dim = self.input_dim
+        self.updated_input_dim: int = max(self.input_dim, self.hidden_dim)
 
         # Set fields based on input parameters
         self.dropout = nn.Dropout(self.dropout_ratio)
@@ -348,13 +344,12 @@ class Forge(nn.Module):
         h = self.bn3(h)
         h = self.dropout(h)
 
-        # Save output at this stage TODO: i don't see a "save" here?
-
         # This is going to be our "embedding" of the input graph
         h_list.append(h)
 
         # The same "embedding" is then passed into the vector quantizer below
         # TODO PyG vq does not return these 5 things..
+        quantized, codebook, commit_loss = self.vq(h)
         quantized, _, commit_loss, dist, codebook = self.vq(h)
         quantized_node = self.decoder_node(quantized)
         quantized_edge_1 = self.decoder_edge_1(quantized)
@@ -365,6 +360,7 @@ class Forge(nn.Module):
         if self.has_variable_proba_head:
             variable_proba_head = F.sigmoid(self.variable_proba_layer(quantized))
 
+        # TODO is this sigmoid appropriate for integral gap prediction? Should it be ReLU or linear?
         integral_gap_head = None
         if self.has_integral_gap_head:
             integral_gap_head = F.sigmoid(self.integral_gap_layer(quantized))
@@ -409,9 +405,9 @@ class Forge(nn.Module):
             edge_scale = adj * 1
             diff = torch.square(adj - adj_quantized)
             diff *= edge_scale
-
-            pos_edge_rec_loss = self.lambda_edge * torch.mean(diff)
             edge_rec_loss = self.lambda_edge * torch.sqrt(F.mse_loss(adj, adj_quantized))
+            # Extra penalty for positive edges
+            pos_edge_rec_loss = self.lambda_edge * torch.mean(diff)
             edge_rec_loss += pos_edge_rec_loss
 
         # Distance Matrix - Distance From Each Node's Embedding to Each Code in the Codebook
@@ -440,17 +436,14 @@ class Forge(nn.Module):
             return
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # TODO Claude says: Rebinding self inside method is misleading but harmless;
-        #  prefer self.to(device) (which is in-place for modules) without reassigning local self.
-        self = self.to(device)
+        self.to(device)
 
         if model_type == Constants.FORGE_PRE_TRAIN:
             self.has_integral_gap_head = False
             self.has_variable_proba_head = False
         elif model_type == Constants.FORGE_FINE_TUNE_INTEGRAL_GAP:
-            # TODO why are we setting both to true for integral gap??
             self.has_integral_gap_head = True
-            self.has_variable_proba_head = True
+            self.has_variable_proba_head = False
         elif model_type == Constants.FORGE_FINE_TUNE_VARIABLE_PROBA:
             self.has_integral_gap_head = False
             self.has_variable_proba_head = True
@@ -497,6 +490,7 @@ class Forge(nn.Module):
         """
 
         # Put module into training mode (use super to avoid recursion) and move to device
+        # .train() retains dropout and batchnorm behavior vs. .eval() for inference remove dropout and freeze batchnorm
         super().train()
         self.to(self.device)
 
@@ -528,8 +522,7 @@ class Forge(nn.Module):
 
             # MIP instances in dataset
             loss = None
-            # TODO why is this starting from idx 10? are we skipping the first 10 instances?
-            for idx in range(10, len(input_mipinfo_list)):
+            for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
 

@@ -60,10 +60,8 @@ class MIPLabeler:
             # Retrieve lp and mip objective values and solutions
             lp_obj = lp_model.objVal
             lp_sol = [v.x for v in lp_model.getVars()]
-            # lp_sol = lp_model.Xn
             mip_obj = mip_model.objVal
             mip_sol = [v.x for v in mip_model.getVars()]
-            # mip_sol = mip_model.Xn
 
             # Calculate ratio (handle zero division)
             # TODO does this assume minimization? mip_model.ModelSense
@@ -78,7 +76,6 @@ class MIPLabeler:
             # Store gap information
             mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
 
-        # TODO in original code, this is indented incorrectly? it was inside the for-loop above
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
 
         gurobi_env.close()
