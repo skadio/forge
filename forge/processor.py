@@ -519,7 +519,6 @@ class MIPProcessor:
         coeff_adj_sp = sp.csr_matrix(coeff_adj)
         coeff_adj_coo = coeff_adj_sp.tocoo()
 
-        # TODO: commentary explaining the normalization and edge weight computation
         # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
         # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
         # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
