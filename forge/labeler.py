@@ -61,8 +61,9 @@ class MIPLabeler:
 
             # Retrieve lp and mip objective values and solutions
             lp_obj = lp_model.objVal
+            lp_sol = [v.x for v in lp_model.getVars()]
             mip_obj = mip_model.objVal
-            mip_sol = mip_model.Xn
+            mip_sol = [v.x for v in mip_model.getVars()]
 
             # Calculate ratio (handle zero division)
             # For minimization, LP ≤ MIP, so ratio = lp_obj / mip_obj.

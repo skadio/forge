@@ -34,6 +34,7 @@ class Constants(NamedTuple):
     _TEST_DIR_NAME = "tests"
     _TRAIN_CONFIG_NAME = "train_config.yaml"
     _MIPINFO_NAME = "mip_to_mipinfo.pkl"
+    _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"
     _FORGE_LOG_NAME = "forge_pretrain.log"
 
@@ -46,6 +47,7 @@ class Constants(NamedTuple):
 
     default_train_config_yaml = _CONST_FILE_DIR + os.sep + _CONFIGS_DIR_NAME + os.sep + _TRAIN_CONFIG_NAME
     default_mip_to_mipinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _MIPINFO_NAME
+    default_mip_to_gapinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _GAPINFO_NAME
     default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_PKL_NAME
     default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_LOG_NAME
     """The default train config yaml file."""

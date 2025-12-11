@@ -16,9 +16,11 @@ from torch_geometric.nn import SAGEConv
 # Bipartite Graphs: PyG requires explicit edge index tuples
 
 
-from labeler import MIPLabeler, GapInfo
-from processor import MIPInfo, MIPEmbeddings, MIPProcessor
-from utils import EdgeWeightedSAGEConv, blockwise_loss, check_true, Constants, overwrite_if_given
+
+from forge.labeler import MIPLabeler, GapInfo
+from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
+from forge.utils import EdgeWeightedSAGEConv, check_true, Constants, overwrite_if_given
+# from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
 class Forge(nn.Module):
@@ -61,6 +63,7 @@ class Forge(nn.Module):
                 parameters documented below.
             input_dim : int, default=10
                 Dimensionality of the raw node features provided in `feats` during `forward`.
+                Also called feat_dim in some contexts.
                 If `input_dim < hidden_dim` the models internally projects to `hidden_dim`
                     (stored as `updated_input_dim`) to allow a wider first hidden representation;
                 Otherwise, it keeps the original size.
@@ -176,8 +179,8 @@ class Forge(nn.Module):
         # Load default training parameters
         self.epochs: int = config.get('epochs')
         self.steps_per_instance: int = config.get('steps_per_instance')
-        self.learning_rate: float = config.get('learning_rate')
-        self.weight_decay: float = config.get('weight_decay')
+        self.learning_rate: float = float(config.get('learning_rate')) # cast 1e-4 as float! not scientific str
+        self.weight_decay: float = float(config.get('weight_decay')) # cast 1e-4 as float! not scientific str
         self.max_graph_nodes: int = config.get('max_graph_nodes')
 
         # Load seed
@@ -188,15 +191,10 @@ class Forge(nn.Module):
         self.has_variable_proba_head: bool = False
 
         # Update input dim if needed
-        # If input_dim < hidden_dim, we project to hidden_dim first
-        if self.input_dim < self.hidden_dim:
-            self.updated_input_dim = self.hidden_dim
-        # If input_dim >= hidden_dim, we can use input_dim directly
-        else:
-            self.updated_input_dim = self.input_dim
+        self.updated_input_dim: int = max(self.input_dim, self.hidden_dim)
 
         # Set fields based on input parameters
-        self.dropout = nn.Dropout(float(dropout_ratio))
+        self.dropout = nn.Dropout(float(self.dropout_ratio))
 
         # Forge is initially not trained
         self.is_trained = False
@@ -234,7 +232,7 @@ class Forge(nn.Module):
         self.bn3 = nn.BatchNorm1d(self.updated_input_dim)
 
         # Node decoder
-        self.decoder_node = nn.Linear(self.updated_input_dim, input_dim)
+        self.decoder_node = nn.Linear(self.updated_input_dim, self.input_dim)
 
         # Edge decoders. Edges are decoded as product of two matrices
         self.decoder_edge_1 = nn.Linear(self.updated_input_dim, self.decoder_edge_dim)
@@ -357,7 +355,6 @@ class Forge(nn.Module):
         # The same "embedding" is then passed into the vector quantizer below
         # quantized, _, commit_loss, dist, codebook = self.vq(h)
         quantized, indices, commit_loss = self.vq(h)
-
         codebook = self.vq.codebook   # or from the forward output
 
         # Squared Euclidean distances: [N, K]
@@ -374,6 +371,7 @@ class Forge(nn.Module):
         if self.has_variable_proba_head:
             variable_proba_head = F.sigmoid(self.variable_proba_layer(quantized))
 
+        # TODO is this sigmoid appropriate for integral gap prediction? Should it be ReLU or linear?
         integral_gap_head = None
         if self.has_integral_gap_head:
             integral_gap_head = F.sigmoid(self.integral_gap_layer(quantized))
@@ -488,6 +486,7 @@ class Forge(nn.Module):
         """
 
         # Put module into training mode (use super to avoid recursion) and move to device
+        # .train() retains dropout and batchnorm behavior vs. .eval() for inference remove dropout and freeze batchnorm
         super().train()
         self.to(self.device)
 

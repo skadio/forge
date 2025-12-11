@@ -207,3 +207,4 @@ __marimo__/
 
 # Ignore generated MIP pickle from tests
 /tests/mip_to_mipinfo.pkl
+/tests/mip_to_gapinfo.pkl

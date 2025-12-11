@@ -23,7 +23,6 @@ import numpy as np
 import scipy.sparse as sp
 import torch
 import yaml
-from sympy.combinatorics import Coset
 from tqdm import tqdm
 
 from utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
@@ -60,10 +59,16 @@ class MIPInfo:
 
         self.instance_name: Optional[str] = instance_name
         # self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
+
+        # feature_tensor shape: (num_cons + num_vars, feat_dim=10)
         self.feature_tensor: Optional[torch.Tensor] = feature_tensor
         self.num_cons: Optional[int] = num_cons
         self.num_vars: Optional[int] = num_vars
+        # TODO: double-check sizes and index (constraint or var)
+        # - `edge_index`: PyG  COO`(2, E)`
+        #   connectivity from source (constraint) to target (variable) nodes where there is an Edge
         self.edge_index: Optional[torch.Tensor] = edge_index
+        # - `edge_weight`: per-edge normalized coefficient values (FloatTensor of length `E`).
         self.edge_weight: Optional[torch.Tensor] = edge_weight
 
 
@@ -266,8 +271,7 @@ class MIPProcessor:
         - `feature_tensor`: node features stacked with constraints first then variables.
             Feature tensor shape: (num_cons + num_vars, feat_dim)
         - `num_cons`, `num_vars`: counts used to interpret the graph layout.
-        - `edge_index`: PyG COO `(2, E)` connectivity for the bipartite graph where the first
-          `num_cons` nodes are constraints and the next `num_vars` nodes are variables.
+        - `edge_index`: PyG COO `(2, E)`
         - `edge_weight`: per-edge normalized coefficient values (FloatTensor of length `E`).
 
         Parameters
@@ -290,16 +294,13 @@ class MIPProcessor:
         mip_model.remove(to_remove)
         mip_model.update()
 
-        # Get objective equation
-        # obj = np.array([x.Obj for x in mip_model.getVars()])
-
         s = 0
         if is_debug:
             print("Compute Feature Tensor")
             s = time.time()
 
         # Get static feature tensor from MIP, number of constraints, and number of variables
-        # Feature tensor shape: (num_cons + num_vars, feat_dim)
+        # Feature tensor shape: (num_cons + num_vars, feat_dim=10)
         feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
         if is_debug:
@@ -407,7 +408,7 @@ class MIPProcessor:
         input_mip_folder : str
             Path to the directory containing MIP instance files.
         is_sort_by_size : bool
-            If True, sorts the returned file paths by file size in ascending order.
+            If True, sorts the returned file paths by file size in ascending order/smallest first.
 
         Returns
         -------
@@ -422,6 +423,7 @@ class MIPProcessor:
                           p.lower().endswith('.mps.gz') or 
                           p.lower().endswith('.lp.gz')]
 
+        # Smallest sized mip first
         if is_sort_by_size:
             mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
 
@@ -459,18 +461,22 @@ class MIPProcessor:
         coeff_adj_sp = sp.bmat([[top_left, coef_sp], [coef_sp.transpose(), bottom_right]], format='coo')
         # then the old coeff_adj_coo = coeff_adj_sp  # already COO if format='coo'
         edge_index = torch.tensor(np.vstack([coeff_adj_sp.row, coeff_adj_sp.col]), dtype=torch.long)
+
+        # Coefficient of variable in that constraint
         edge_weights = torch.FloatTensor(coeff_adj_sp.data)
+
+        # TODO push this cast inside _normalize_edge_weights() so we don't have to do it here
         edge_weights_np = coeff_adj_sp.data.astype(float)
 
         # Normalize edge weights
-        edge_weight = MIPProcessor._normalize_edge_weights(edge_weights_np)
+        edge_weights = MIPProcessor._normalize_edge_weights(edge_weights_np)
 
         # Validate dimensions
-        check_true(edge_index.shape[1] == edge_weight.shape[0],
+        check_true(edge_index.shape[1] == edge_weights.shape[0],
                    ValueError(f"Error: edge_index has {edge_index.shape[1]} edges but "
-                              f"edge_weight has {edge_weight.shape[0]} entries"))
+                              f"edge_weight has {edge_weights.shape[0]} entries"))
 
-        return edge_index, edge_weight
+        return edge_index, edge_weights
 
     @staticmethod
     def _old_get_edge_index_weight(cls, mip_model, num_cons, num_vars):
@@ -526,7 +532,6 @@ class MIPProcessor:
         coeff_adj_sp = sp.csr_matrix(coeff_adj)
         coeff_adj_coo = coeff_adj_sp.tocoo()
 
-        # TODO: commentary explaining the normalization and edge weight computation
         # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
         # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
         # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
