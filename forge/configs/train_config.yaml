@@ -32,3 +32,5 @@ steps_per_instance: 10
 learning_rate: 1e-4
 weight_decay: 1e-4
 max_graph_nodes: 21000
+safety_eps: 0.05
+adj_block_size: 5120

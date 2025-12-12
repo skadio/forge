@@ -19,7 +19,7 @@ from torch_geometric.nn import SAGEConv
 
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
-from forge.utils import EdgeWeightedSAGEConv, check_true, Constants, overwrite_if_given
+from forge.utils import EdgeWeightedSAGEConv, check_true, Constants, overwrite_if_given, copy_params, blockwise_loss
 # from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
@@ -182,6 +182,8 @@ class Forge(nn.Module):
         self.learning_rate: float = float(config.get('learning_rate')) # cast 1e-4 as float! not scientific str
         self.weight_decay: float = float(config.get('weight_decay')) # cast 1e-4 as float! not scientific str
         self.max_graph_nodes: int = config.get('max_graph_nodes')
+        self.safety_eps: float = config.get('safety_eps') # Safety margin for gap ratio adjustments
+        self.adj_block_size: int = config.get('adj_block_size') # Block size for adjacency reconstruction loss
 
         # Load seed
         self.seed: int = config.get('seed')
@@ -404,7 +406,7 @@ class Forge(nn.Module):
                                            adj,
                                            num_cons, 
                                            lambda_edge=self.lambda_edge,
-                                           batch_size=1024)
+                                           batch_size=self.adj_block_size)
 
         # Distance Matrix - Distance From Each Node's Embedding to Each Code in the Codebook
         dist = torch.squeeze(distances)
@@ -858,18 +860,18 @@ class Forge(nn.Module):
         lp_sol = lp_model.Xn
 
         # Small safety margin to the ratio to make sure we are not infeasible
-        SAFETY_EPS = 0.05
+        
         MIN_PROBLEMS = {"SC", "MVC"}   
         MAX_PROBLEMS = {"GISP", "CA"}         
 
         if problem_type in MIN_PROBLEMS:
             # Minimization: interpret gap_ratio as “how close MIP is to LP”
-            gap_ratio += (SAFETY_EPS * gap_ratio)
+            gap_ratio += (self.safety_eps * gap_ratio)
             mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
 
         elif problem_type in MAX_PROBLEMS:
             # Maximization: interpret gap_ratio as mip_obj / lp_obj in (0, 1]
-            gap_ratio += (SAFETY_EPS * gap_ratio)
+            gap_ratio += (self.safety_eps * gap_ratio)
             mip_obj = lp_obj * gap_ratio
 
         

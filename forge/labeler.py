@@ -76,7 +76,7 @@ class MIPLabeler:
             print("\rInstance : ", idx, "| Ratio : ", ratio, end='')
 
             # Store gap information
-            mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
+            mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
 
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
 

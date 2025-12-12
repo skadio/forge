@@ -3,10 +3,10 @@ from typing import Union, List, Sequence, Dict, Any, Optional
 
 import gurobipy as gp
 
-from embeddings import Forge
-from processor import MIPProcessor, MIPEmbeddings
-from utils import check_true, save_pickle, load_pickle
-from labeler import MIPLabeler, GapInfo
+from forge.embeddings import Forge
+from forge.processor import MIPProcessor, MIPEmbeddings
+from forge.utils import check_true, save_pickle, load_pickle
+from forge.labeler import MIPLabeler, GapInfo
 
 
 def finetune_integral_gap(forge: Forge,

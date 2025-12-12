@@ -25,7 +25,7 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
+from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
 
 
 class MIPInfo:
