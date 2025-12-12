@@ -10,6 +10,8 @@ from forge.labeler import MIPLabeler, GapInfo
 
 
 def finetune_integral_gap(forge: Forge,
+                          input_forge_pkl: str,
+                          model_type: str,
                           input_mip_folder: str,
                           output_forge_finetuned_pkl: str,
                           output_mip_to_gapinfo_pkl: str,
@@ -26,6 +28,10 @@ def finetune_integral_gap(forge: Forge,
     ----------
     forge : Forge
         The Forge model to be fine-tuned.
+    input_forge_pkl : str
+        Path to the pre-trained Forge model pickle file.
+    model_type : str
+        The type of the model to use (e.g., "fine-tune").
     input_mip_folder : str
         Path to the folder containing MIP files for fine-tuning.
     output_forge_finetuned_pkl : str
@@ -58,6 +64,10 @@ def finetune_integral_gap(forge: Forge,
     ValueError
         If the provided input paths are invalid or required files/folders do not exist.
     """
+
+    # Load pre-trained Forge model ready for fine-tuning
+    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+
     _validate_forge(forge, check_trained=True)
 
     # Use existing mip_to_integral_gap if given, or generate it
@@ -75,6 +85,7 @@ def finetune_integral_gap(forge: Forge,
         mip_to_gapinfo = labeler.get_mip_to_gapinfo(input_mip_folder=input_mip_folder,
                                                     output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
                                                     gapinfo_time_limit=gapinfo_time_limit,
+                                                    gurobi_num_threads=1,
                                                     has_return=True)
 
     # Fine-tune the Forge model
@@ -85,7 +96,6 @@ def finetune_integral_gap(forge: Forge,
                                  learning_rate=learning_rate,
                                  weight_decay=weight_decay,
                                  max_graph_nodes=max_graph_nodes)
-
 
 def pretrain(forge: Forge,
              input_mip_folder: Optional[str],
@@ -241,6 +251,8 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
 
 
 def mip_to_gap_info(forge: Forge,
+                    input_forge_pkl: str,
+                    model_type: str,
                     input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
                     output_mip_to_gap_info_pkl: str,
                     problem_type: str) -> Dict[str, GapInfo]:
@@ -250,7 +262,11 @@ def mip_to_gap_info(forge: Forge,
     Parameters
     ----------
     forge : Forge
-        A trained Forge instance.
+        A Forge instance.
+    input_forge_pkl : str
+        Path to the input Forge pickle file.
+    model_type : str
+        The type of the model to use (e.g., "fine-tune").
     input_mips : str | gp.Model | Sequence[str | gp.Model]
         Path to a directory containing MIP files,
         Path to a single MIP file,
@@ -274,6 +290,9 @@ def mip_to_gap_info(forge: Forge,
     ValueError
         If any element of `input_mips` is not a supported type.
     """
+
+    # Load pre-trained Forge model
+    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
 
     _validate_forge(forge, check_trained=True)
 

@@ -11,10 +11,10 @@ import yaml
 # from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
+from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
 from forge.labeler import GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given, copy_params
-from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
 
 
 # from dgl.nn import SAGEConv
@@ -23,9 +23,6 @@ from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
 # Edge Weights: PyG passes edge weights directly to the layer
 # Bipartite Graphs: PyG requires explicit edge index tuples
 
-
-# from vqgraph.vq import VectorQuantize
-from vector_quantize_pytorch import VectorQuantize
 
 class Forge(nn.Module):
     """Forge model: GraphSAGE+ encoder with Vector Quantization for MIP graphs.
@@ -186,8 +183,10 @@ class Forge(nn.Module):
         self.learning_rate: float = float(config.get('learning_rate'))  # cast 1e-4 as float! not scientific str
         self.weight_decay: float = float(config.get('weight_decay'))  # cast 1e-4 as float! not scientific str
         self.max_graph_nodes: int = config.get('max_graph_nodes')
-        self.safety_eps: float = config.get('safety_eps') # Safety margin for gap ratio adjustments
-        self.adj_block_size: int = config.get('adj_block_size') # Block size for adjacency reconstruction loss
+        self.adj_block_size: int = config.get('adj_block_size')  # Block size for adjacency reconstruction loss
+
+        # Load integral gap parameters
+        self.integral_gap_safety_eps: float = config.get('integral_gap_safety_eps')  # Margin for gap ratio adjustments
 
         # Load seed
         self.seed: int = config.get('seed')
@@ -656,7 +655,6 @@ class Forge(nn.Module):
 
     def _finetune_integral_gap(self,
                                input_mip_to_gapinfo: Dict[str, GapInfo],
-                               input_forge_pretrained_pkl: str,
                                output_forge_finetuned_pkl: str,
                                epochs: Optional[int] = None,  # 10,
                                steps_per_instance: Optional[int] = None,  # 10,
@@ -670,8 +668,6 @@ class Forge(nn.Module):
         ----------
         input_mip_to_gapinfo : Dict[str, GapInfo]
             Dictionary mapping MIP file paths to their GapInfo objects containing LP/MIP solutions.
-        input_forge_pretrained_pkl : str
-            Path to the pre-trained Forge model state_dict.
         output_forge_finetuned_pkl : str
             Path to save the fine-tuned model state_dict.
         epochs : Optional[int], default=None
@@ -700,11 +696,12 @@ class Forge(nn.Module):
         self.to(self.device)
         self.train()
 
-        if self.is_trained == True and self.has_integral_gap_head == False:
+        if self.is_trained and not self.has_integral_gap_head:
             print("Warning: Forge model has been pre-trained but missing integral gap head, adding head.")
             self.has_integral_gap_head = True
             self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
 
+            # TODO: We already have self. Why is new Forge() needed, plus copy(). Add comments
             pre_trained = Forge()
             pre_trained.load_model(input_forge_pretrained_pkl, model_type=Constants.FORGE_PRE_TRAIN)
 
@@ -733,9 +730,6 @@ class Forge(nn.Module):
 
                 # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
                 mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
-
-                # Some instances are too big to fit in the GPU (max_graph_nodes=30000)
-                # if mipinfo.dgl_graph.num_nodes() <= max_graph_nodes:
 
                 # Skip if too large to fit in GPU memory
                 num_nodes = mipinfo.num_cons + mipinfo.num_vars
@@ -864,20 +858,18 @@ class Forge(nn.Module):
         lp_obj = lp_model.ObjVal
         lp_sol = lp_model.Xn
 
-        # Small safety margin to the ratio to make sure we are not infeasible
-        
-        MIN_PROBLEMS = {"SC", "MVC"}   
-        MAX_PROBLEMS = {"GISP", "CA"}         
-
-        if problem_type in MIN_PROBLEMS:
+        mip_obj = lp_obj
+        if problem_type in Constants.MIN_PROBLEMS:
             # Minimization: interpret gap_ratio as “how close MIP is to LP”
-            gap_ratio += (self.safety_eps * gap_ratio)
+            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
             mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
-
-        elif problem_type in MAX_PROBLEMS:
+        elif problem_type in Constants.MAX_PROBLEMS:
             # Maximization: interpret gap_ratio as mip_obj / lp_obj in (0, 1]
-            gap_ratio += (self.safety_eps * gap_ratio)
+            # Small safety margin to the ratio to make sure we are not infeasible
+            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
             mip_obj = lp_obj * gap_ratio
+        else:
+            raise ValueError(f"Error: Unknown problem type '{problem_type}' for mip_model_to_gapinfo")
 
         # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
         gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)

@@ -3,6 +3,7 @@ from tests.test_base import BaseTest
 from forge.utils import Constants
 from forge.processor import MIPProcessor
 
+
 class LabelerTest(BaseTest):
 
     # TEST main functionality of MIPLabeler

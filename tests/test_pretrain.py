@@ -4,10 +4,10 @@ from tests.test_base import BaseTest
 
 from forge.utils import Constants
 
+
 class PretrainTest(BaseTest):
 
     def test_pretrain(self):
-
         # Forge model
         forge = Forge(train_config_yaml=Constants.default_train_config_yaml)
 

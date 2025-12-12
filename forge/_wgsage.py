@@ -41,12 +41,10 @@ class EdgeWeightedSAGEConv(MessagePassing):
         #   - message() is called for each edge (i -> j)
         #   - aggregate() (from MessagePassing) combines messages per node
         #   - update() combines aggregated message with root features
-        out = self.propagate(
-            edge_index=edge_index,
-            x=x,
-            edge_weight=edge_weight,
-            x_root=x_root,
-        )
+        out = self.propagate(edge_index=edge_index,
+                             x=x,
+                             edge_weight=edge_weight,
+                             x_root=x_root)
 
         return out
 

@@ -2,13 +2,14 @@ from typing import Any, Dict
 from tqdm import tqdm
 import gurobipy as gp
 
-from processor import MIPProcessor
-from utils import save_pickle
+from forge.processor import MIPProcessor
+from forge.utils import save_pickle
 
 
 class GapInfo:
-    def __init__(self, lp_obj: float, mip_obj: float, mip_sol: Any, gap_ratio: float):
+    def __init__(self, lp_obj: float, lp_sol:Any, mip_obj: float, mip_sol: Any, gap_ratio: float):
         self.lp_obj = lp_obj
+        self.lp_sol = lp_sol
         self.mip_obj = mip_obj
         self.mip_sol = mip_sol
         self.gap_ratio = gap_ratio
@@ -23,7 +24,7 @@ class MIPLabeler:
     def get_mip_to_gapinfo(input_mip_folder,
                            output_mip_to_gapinfo_pkl,
                            gapinfo_time_limit: int = 120,
-                           gapinto_processor_num_workers: int = 1,
+                           gurobi_num_threads: int = 1,
                            has_return=False) -> Dict[str, GapInfo]:
 
         mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=False)
@@ -34,7 +35,7 @@ class MIPLabeler:
 
         # Set time limit
         gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
-        gurobi_env.setParam("Threads", gapinto_processor_num_workers)
+        gurobi_env.setParam("Threads", gurobi_num_threads)
 
         mip_to_gapinfo = {}
         for idx, mip_file in tqdm(enumerate(mip_files)):
@@ -76,7 +77,9 @@ class MIPLabeler:
             print("\rInstance : ", idx, "| Ratio : ", ratio, end='')
 
             # Store gap information
-            mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
+            mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol,
+                                               mip_obj=mip_obj, mip_sol=mip_sol,
+                                               gap_ratio=ratio)
 
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
 

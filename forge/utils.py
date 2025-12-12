@@ -14,6 +14,8 @@ class Constants(NamedTuple):
     Constant values used by the modules.
     """
 
+    MIN_PROBLEMS = {"SC", "MVC"}
+    MAX_PROBLEMS = {"GISP", "CA"}
     NUM_VARIABLE_FEATURES = 6
     NUM_CONSTRAINT_FEATURES = 4
 

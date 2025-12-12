@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-
 class ProcessorTest(BaseTest):
     class DummyModel:
         pass

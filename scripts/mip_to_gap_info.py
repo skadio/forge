@@ -25,11 +25,10 @@ if __name__ == "__main__":
     # Create Forge with its training configuration
     forge = Forge(args.train_config_yaml)
 
-    # Load pre-trained Forge model
-    forge.load_model(input_forge_pkl=args.input_forge_pkl, model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP)
-
     # Generate embeddings
     mip_to_gap_info_dict = mip_to_gap_info(forge=forge,
+                                           input_forge_pkl=args.input_forge_pkl,
+                                           model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                            input_mips=args.input_mips,
                                            output_mip_to_gap_info_pkl=args.output_mip_to_gap_info_pkl,
                                            problem_type=args.problem_type)
