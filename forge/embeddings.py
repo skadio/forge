@@ -8,18 +8,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import yaml
+# from vqgraph.vq import VectorQuantize
+from vector_quantize_pytorch import VectorQuantize
+
+from forge.labeler import GapInfo
+from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
+from forge.utils import check_true, Constants, overwrite_if_given, copy_params
+from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
+
+
 # from dgl.nn import SAGEConv
-from torch_geometric.nn import SAGEConv
 # DL vs PyG Key Differences to Address
 # Graph Representation: PyG uses edge indices instead of DGL graphs
 # Edge Weights: PyG passes edge weights directly to the layer
 # Bipartite Graphs: PyG requires explicit edge index tuples
 
 
-
-from forge.labeler import MIPLabeler, GapInfo
-from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
-from forge.utils import EdgeWeightedSAGEConv, check_true, Constants, overwrite_if_given, copy_params, blockwise_loss
 # from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
@@ -179,14 +183,15 @@ class Forge(nn.Module):
         # Load default training parameters
         self.epochs: int = config.get('epochs')
         self.steps_per_instance: int = config.get('steps_per_instance')
-        self.learning_rate: float = float(config.get('learning_rate')) # cast 1e-4 as float! not scientific str
-        self.weight_decay: float = float(config.get('weight_decay')) # cast 1e-4 as float! not scientific str
+        self.learning_rate: float = float(config.get('learning_rate'))  # cast 1e-4 as float! not scientific str
+        self.weight_decay: float = float(config.get('weight_decay'))  # cast 1e-4 as float! not scientific str
         self.max_graph_nodes: int = config.get('max_graph_nodes')
         self.safety_eps: float = config.get('safety_eps') # Safety margin for gap ratio adjustments
         self.adj_block_size: int = config.get('adj_block_size') # Block size for adjacency reconstruction loss
 
         # Load seed
         self.seed: int = config.get('seed')
+        self.wgsage_block_loss_batch_size = 1023
 
         # Initialize without downstream heads. load_model() can set these later.
         self.has_integral_gap_head: bool = False
@@ -220,8 +225,10 @@ class Forge(nn.Module):
         # self.graph_layer_2: SAGEConv = SAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
 
         # Modified GraphSAGE to accept edge weights
-        self.graph_layer_1 = EdgeWeightedSAGEConv(self.input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
-        self.graph_layer_2 = EdgeWeightedSAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
+        self.graph_layer_1 = EdgeWeightedSAGEConv(self.input_dim, self.updated_input_dim,
+                                                  aggr=self.graph_sage_aggregation)
+        self.graph_layer_2 = EdgeWeightedSAGEConv(self.updated_input_dim, self.updated_input_dim,
+                                                  aggr=self.graph_sage_aggregation)
 
         # Linear layers
         self.linear = nn.Linear(self.updated_input_dim, self.updated_input_dim)
@@ -340,7 +347,7 @@ class Forge(nn.Module):
         # Decommission: DGL GraphSAGE Layer 2
         # h = self.graph_layer_2(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
         h = self.graph_layer_2(h, edge_index, edge_weight=edge_weight)
-        h = self.activation(h) # PyG needs explicit activation
+        h = self.activation(h)  # PyG needs explicit activation
         h = self.bn2(h)
         h = self.dropout(h)
 
@@ -355,20 +362,20 @@ class Forge(nn.Module):
         h_list.append(h)
 
         # The same "embedding" is then passed into the vector quantizer below
-        # quantized, _, commit_loss, dist, codebook = self.vq(h)
+        # quantized, _, commit_loss, dist, codebook = self.vq(h) # DGL version
         quantized, indices, commit_loss = self.vq(h)
-        codebook = self.vq.codebook   # or from the forward output
+        codebook = self.vq.codebook  # or from the forward output
 
         # Squared Euclidean distances: [N, K]
-        x_norm = (h ** 2).sum(dim=-1, keepdim=True)        # [N, 1]
+        x_norm = (h ** 2).sum(dim=-1, keepdim=True)  # [N, 1]
         c_norm = (codebook ** 2).sum(dim=-1).unsqueeze(0)  # [1, K]
-        distances = x_norm + c_norm - 2 * h @ codebook.t() # [N, K]
+        distances = x_norm + c_norm - 2 * h @ codebook.t()  # [N, K]
 
         quantized_node = self.decoder_node(quantized)
         quantized_edge_1 = self.decoder_edge_1(quantized)
         quantized_edge_2 = self.decoder_edge_2(quantized)
 
-        # The "embedding" is passed into the prob head and the cut head below
+        # The "embedding" is passed into the proba head and gap head below
         variable_proba_head = None
         if self.has_variable_proba_head:
             variable_proba_head = F.sigmoid(self.variable_proba_layer(quantized))
@@ -404,7 +411,7 @@ class Forge(nn.Module):
                                            quantized_edge_1,
                                            quantized_edge_2,
                                            adj,
-                                           num_cons, 
+                                           num_cons,
                                            lambda_edge=self.lambda_edge,
                                            batch_size=self.adj_block_size)
 
@@ -650,12 +657,12 @@ class Forge(nn.Module):
     def _finetune_integral_gap(self,
                                input_mip_to_gapinfo: Dict[str, GapInfo],
                                input_forge_pretrained_pkl: str,
-                               output_forge_finetuned_pkl : str,
-                               epochs: Optional[int] = None, #10,
-                               steps_per_instance: Optional[int] = None, # 10,
-                               learning_rate: Optional[float] = None, # 1e-4,
-                               weight_decay: Optional[float] = None, #5e-4,
-                               max_graph_nodes: Optional[int] = None #30000
+                               output_forge_finetuned_pkl: str,
+                               epochs: Optional[int] = None,  # 10,
+                               steps_per_instance: Optional[int] = None,  # 10,
+                               learning_rate: Optional[float] = None,  # 1e-4,
+                               weight_decay: Optional[float] = None,  # 5e-4,
+                               max_graph_nodes: Optional[int] = None  # 30000
                                ) -> None:
         """Fine-tune the Forge model for integral gap prediction.
 
@@ -697,11 +704,11 @@ class Forge(nn.Module):
             print("Warning: Forge model has been pre-trained but missing integral gap head, adding head.")
             self.has_integral_gap_head = True
             self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
-            
+
             pre_trained = Forge()
             pre_trained.load_model(input_forge_pretrained_pkl, model_type=Constants.FORGE_PRE_TRAIN)
 
-            copy_params(old_model = pre_trained, new_model = self)
+            copy_params(old_model=pre_trained, new_model=self)
             del pre_trained
 
             # Ensure old model is deleted from memory
@@ -757,12 +764,10 @@ class Forge(nn.Module):
                     if gap_ratio_true > 1:
                         gap_ratio_true = 1 / gap_ratio_true
 
-
                     # Comment out - optional variable probability head
                     # Predict variable probabilities
                     # var_proba_pred = h_list[-2][mipinfo.num_cons:, :]
                     # var_proba_truth = torch.Tensor(input_mip_to_gapinfo[mip].mip_sol).to(self.device)
-                    
 
                     try:
                         loss = torch.abs(gap_ratio_pred - gap_ratio_true)
@@ -790,7 +795,7 @@ class Forge(nn.Module):
         # Close Gurobi environment
         gurobi_env.close()
 
-    def _mip_model_to_gapinfo(self, mip_model: gp.Model, problem_type:str) -> GapInfo:
+    def _mip_model_to_gapinfo(self, mip_model: gp.Model, problem_type: str) -> GapInfo:
         """
         Predict integral gap information for a Gurobi model.
 
@@ -874,7 +879,6 @@ class Forge(nn.Module):
             gap_ratio += (self.safety_eps * gap_ratio)
             mip_obj = lp_obj * gap_ratio
 
-        
         # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
         gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
 
