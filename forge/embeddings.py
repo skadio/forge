@@ -190,7 +190,6 @@ class Forge(nn.Module):
 
         # Load seed
         self.seed: int = config.get('seed')
-        self.wgsage_block_loss_batch_size = 1023
 
         # Initialize without downstream heads. load_model() can set these later.
         self.has_integral_gap_head: bool = False
