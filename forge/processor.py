@@ -49,11 +49,10 @@ class MIPInfo:
         Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
     """
 
-    def __init__(self,
-                 instance_name: str = None,
-                 feature_tensor: Optional[torch.Tensor] = None,
+    def __init__(self, instance_name: str = None,
                  num_cons: int = None,
                  num_vars: int = None,
+                 feature_tensor: Optional[torch.Tensor] = None,
                  edge_index: Optional[torch.Tensor] = None,
                  edge_weight: Optional[torch.Tensor] = None):
 
@@ -186,7 +185,9 @@ class MIPProcessor:
         # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_mip_files))):
-            
+
+            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
+
             # Read MIP file to a Gurobi model
             mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
 
@@ -196,6 +197,7 @@ class MIPProcessor:
             except Exception as e:
                 print(f"Warning: Failed to convert MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
                 continue
+
             mipinfo.instance_name = sorted_mip_files[idx]
             mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
@@ -233,6 +235,8 @@ class MIPProcessor:
                     # Release copy model
                     mip_model_relaxed.dispose()
 
+            print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx])
+
         # Close Gurobi environment
         gurobi_env.close()
 
@@ -263,7 +267,7 @@ class MIPProcessor:
         return mipinfo_list
 
     @staticmethod
-    def _mip_model_to_mipinfo(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
+    def _mip_model_to_mipinfo(mip_model: gp.Model) -> Union[bool, MIPInfo]:
         """
         Convert a Gurobi model into a MIPInfo.
 
@@ -294,27 +298,27 @@ class MIPProcessor:
         mip_model.remove(to_remove)
         mip_model.update()
 
-        s = 0
-        if is_debug:
-            print("Compute Feature Tensor")
-            s = time.time()
+        # s = 0
+        # print("<< Start: Compute feature tensor")
+        # s = time.time()
 
         # Get static feature tensor from MIP, number of constraints, and number of variables
         # Feature tensor shape: (num_cons + num_vars, feat_dim=10)
         feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
-        if is_debug:
-            print("Feature Tensor Computed in ", time.time() - s, "seconds")
-            print("Creating PyG edge tensors")
-            s = time.time()
+        # print(">> Finish: Compute feature tensor: ", time.time() - s, " seconds")
+        # print("<< Start: Create PyG edge tensors")
+        # s = time.time()
 
         # Get edge indexes and weights in Tensor, ready for PyG
         edge_index, edge_weight = MIPProcessor._get_edge_index_weight(mip_model, num_cons, num_vars)
         # edge_index, edge_weight = MIPProcessor._old_get_edge_index_weight(mip_model, num_cons, num_vars, is_debug)
 
-        return MIPInfo(feature_tensor=feature_tensor,
-                       num_cons=num_cons, num_vars=num_vars,
-                       edge_index=edge_index, edge_weight=edge_weight)
+        # print(">> Finish: Create PyG edge tensor: ", time.time() - s, " seconds")
+        # s = time.time()
+
+        return MIPInfo(num_cons=num_cons, num_vars=num_vars, feature_tensor=feature_tensor, edge_index=edge_index,
+                       edge_weight=edge_weight)
 
     @staticmethod
     def _get_feature_tensor_num_cons_num_vars(mip_model):

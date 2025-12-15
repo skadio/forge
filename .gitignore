@@ -206,9 +206,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Ignore generated MIP pickle from tests
+# Ignore generated MIP pickles
 /tests/mip_to_mipinfo.pkl
 /tests/mip_to_gapinfo.pkl
+/tests/forge_pretrained.pkl
+/tests/forge_pretrain.log
+
+/models/mip_to_mipinfo.pkl
+/models/mip_to_gapinfo.pkl
+/models/forge_pretrained.pkl
+/models/forge_pretrain.log
 
 # Ignore macOS system files
 .DS_Store

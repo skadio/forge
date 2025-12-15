@@ -167,7 +167,8 @@ def pretrain(forge: Forge,
     else:
         check_true(input_mip_to_mipinfo_pkl is None and os.path.isdir(input_mip_folder),
                    ValueError("Error: Either `input_mip_to_mipinfo_pkl` must be provided, "
-                              "or a valid `input_mip_folder` must be specified to generate it."))
+                              "or a valid `input_mip_folder` must be specified to generate it." +
+                              f" input_mip_folder={input_mip_folder!r}."))
 
         # Convert MIP files to MIPInfo objects and save to pickle
         mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
@@ -190,7 +191,10 @@ def pretrain(forge: Forge,
                     max_graph_nodes=max_graph_nodes)
 
 
-def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
+def mip_to_embeddings(forge: Forge,
+                      input_forge_pkl: str,
+                      model_type: str,
+                      input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
                       output_mip_to_embeddings_pkl: str) -> Dict[str, MIPEmbeddings]:
     """
     Generate embeddings for one or more MIP inputs using a trained Forge instance.
@@ -199,6 +203,10 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
     ----------
     forge : Forge
         A trained Forge instance.
+    input_forge_pkl : str
+        Path to the input Forge pickle file.
+    model_type : str
+        The type of the model to use (e.g., "fine-tune").
     input_mips : str | gp.Model | Sequence[str | gp.Model]
         Path to a directory containing MIP files,
         Path to a single MIP file,
@@ -218,6 +226,10 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
     ValueError
         If any element of `input_mips` is not a supported type.
     """
+
+    # Load pre-trained Forge model
+    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
@@ -229,6 +241,7 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
     # For each MIP item, create MIP model, and generate embedding
     mip_to_embeddings = {}
     for mip_item in mip_items:
+        print("<< Start: Generate embeddings:", mip_item)
 
         # Read MIP file to a Gurobi model (or use the provided model)
         if isinstance(mip_item, gp.Model):
@@ -241,6 +254,8 @@ def mip_to_embeddings(forge: Forge, input_mips: Union[str, gp.Model, Sequence[Un
         # Convert MIP to vector representation
         mip_embeddings = forge._mip_model_to_embeddings(mip_model)
         mip_to_embeddings[key] = mip_embeddings
+
+        print(">> Finish: Generate embeddings:", mip_item)
 
     # Close Gurobi environment
     gurobi_env.close()
@@ -306,6 +321,8 @@ def mip_to_gap_info(forge: Forge,
     mip_to_gap_info = {}
     for mip_item in mip_items:
 
+        print("<< Start: Create GapInfo", mip_item)
+
         # Read MIP file to a Gurobi model (or use the provided model)
         if isinstance(mip_item, gp.Model):
             mip_model = mip_item
@@ -318,6 +335,8 @@ def mip_to_gap_info(forge: Forge,
         # Convert MIP to vector representation
         gap_info = forge._mip_model_to_gapinfo(mip_model, problem_type)
         mip_to_gap_info[key] = gap_info
+
+        print("<< Finish: Create GapInfo", mip_item)
 
     # Close Gurobi environment
     gurobi_env.close()

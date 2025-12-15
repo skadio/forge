@@ -7,15 +7,15 @@ if __name__ == "__main__":
 
     # Parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
+    parser.add_argument('--train_config_yaml', type=str, default='./forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_mip_folder', type=str, default='/data/train/',
+    parser.add_argument('--input_mip_folder', type=str, default='./data/train/',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='/models/mip_to_mipinfo.pkl',
+    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='./models/mip_to_mipinfo.pkl',
                         help='Output path for the mip_to_mipinfo pickle')
-    parser.add_argument('--output_forge_pretrained_pkl', type=str, default='/models/forge_pretrained.pkl',
+    parser.add_argument('--output_forge_pretrained_pkl', type=str, default='./models/forge_pretrained.pkl',
                         help='Output path for the pretrained Forge pickle')
-    parser.add_argument('--output_log_file', type=str, default='/models/forge_pretrained.log',
+    parser.add_argument('--output_log_file', type=str, default='./models/forge_pretrained.log',
                         help='Path to write the pretraining log')
     parser.add_argument('--input_mip_to_mipinfo_pkl', type=str, default=None,
                         help='Optional path to an existing mip_to_mipinfo pickle to load instead of generating it')

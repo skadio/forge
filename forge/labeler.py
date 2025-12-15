@@ -29,7 +29,6 @@ class MIPLabeler:
                            has_return=False) -> Dict[str, GapInfo]:
 
         mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=False)
-        print ('''Starting MIP to GapInfo conversion for {} instances...'''.format(len(mip_files)))
 
         # Start Gurobi environment
         gurobi_env = MIPProcessor._start_gurobi_env()
@@ -54,11 +53,13 @@ class MIPLabeler:
             # Skip instances that are infeasible or unbounded
             if mip_model.status == gp.GRB.status.INF_OR_UNBD or lp_model.status == gp.GRB.status.INF_OR_UNBD:
                 print(f"\rInstance : {idx} | Skipped (status: MIP={mip_model.status}, LP={lp_model.status})", end='')
+                print(mip_file)
                 continue
 
             # Skip instances without a solution
             if mip_model.SolCount < 1 or lp_model.SolCount < 1:
                 print(f"\rInstance : {idx} | Skipped (status: MIP={mip_model.status}, LP={lp_model.status})", end='')
+                print(mip_file)
                 continue
 
             # Retrieve lp and mip objective values and solutions
@@ -75,7 +76,8 @@ class MIPLabeler:
             else:  # maximization
                 ratio = 1.0 if lp_obj == 0 else mip_obj / lp_obj
 
-            print("\rInstance : ", idx, "| Ratio : ", ratio, end='')
+            print("\rInstance : ", idx, "| Ratio : ", ratio)
+            print(mip_file)
 
             # Store gap information
             mip_to_gapinfo[mip_file] = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol,

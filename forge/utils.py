@@ -20,35 +20,41 @@ class Constants(NamedTuple):
     NUM_CONSTRAINT_FEATURES = 4
 
     # Forge Model Types
-    FORGE_PRE_TRAIN = "forge_pretrain"
-    FORGE_FINE_TUNE_INTEGRAL_GAP = "forge_fine_tune_integral_gap"
-    FORGE_FINE_TUNE_VARIABLE_PROBA = "forge_fine_tune_variable_proba"
+    FORGE_PRE_TRAIN = "pretrain"
+    FORGE_FINE_TUNE_INTEGRAL_GAP = "fine_tune_integral_gap"
+    FORGE_FINE_TUNE_VARIABLE_PROBA = "fine_tune_variable_proba"
 
     # Names
     _DATA_DIR_NAME = "data"
+    _TESTING_DIR_NAME = "test"
+    _TRAINING_DIR_NAME = "train"
     _FORGE_DIR_NAME = "forge"
     _CONFIGS_DIR_NAME = "configs"
     _MODELS_DIR_NAME = "models"
-    _TEST_DIR_NAME = "tests"
+    _TESTS_DIR_NAME = "tests"
     _TRAIN_CONFIG_NAME = "train_config.yaml"
     _MIPINFO_NAME = "mip_to_mipinfo.pkl"
+    _EMBEDDINGS_NAME = "mip_to_embeddings.pkl"
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"
     _FORGE_LOG_NAME = "forge_pretrain.log"
 
-    # Paths
+    # Folders
     _CONST_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
     DATA_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _DATA_DIR_NAME
-    DATA_TEST_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _DATA_DIR_NAME
+    DATA_TESTING_DIR = DATA_DIR + os.sep + _TESTING_DIR_NAME
+    DATA_TRAINING_DIR = DATA_DIR + os.sep + _TRAINING_DIR_NAME
+    DATA_TESTS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _DATA_DIR_NAME
     MODELS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _MODELS_DIR_NAME
     CONFIGS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _FORGE_DIR_NAME + os.sep + _CONFIGS_DIR_NAME
 
+    # File paths
     default_train_config_yaml = _CONST_FILE_DIR + os.sep + _CONFIGS_DIR_NAME + os.sep + _TRAIN_CONFIG_NAME
-    default_mip_to_mipinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _MIPINFO_NAME
-    default_mip_to_gapinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _GAPINFO_NAME
-    default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_PKL_NAME
-    default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TEST_DIR_NAME + os.sep + _FORGE_LOG_NAME
-    """The default train config yaml file."""
+    default_mip_to_embeddings_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _MIPINFO_NAME
+    default_mip_to_mipinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _MIPINFO_NAME
+    default_mip_to_gapinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _GAPINFO_NAME
+    default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_PKL_NAME
+    default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_LOG_NAME
 
 
 def params(torch_model):

@@ -17,7 +17,7 @@ class ProcessorTest(BaseTest):
 
         # Create MIP to MIPInfo dictionary
         relaxation_list = [0.05, 0.01]
-        mip_to_mipinfo = mip_proc.convert_mip_to_mipinfo(input_mip_folder=Constants.DATA_TEST_DIR,
+        mip_to_mipinfo = mip_proc.convert_mip_to_mipinfo(input_mip_folder=Constants.DATA_TESTS_DIR,
                                                          output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                                                          relaxation_list=relaxation_list,
                                                          has_return=True)
@@ -27,7 +27,7 @@ class ProcessorTest(BaseTest):
 
         # We create one relaxed instance per relaxation ratio for each MIP instance
         # E.g., if there are 5 MIP instances and 2 relaxation ratios, we should have 15 MIPInfo objects
-        input_folder = Path(Constants.DATA_TEST_DIR)
+        input_folder = Path(Constants.DATA_TESTS_DIR)
         num_instances = sum(1 for p in input_folder.iterdir() if p.is_file())
         self.assertEqual(len(mipinfo_list), num_instances * (len(relaxation_list) + 1))
 

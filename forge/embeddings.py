@@ -562,7 +562,7 @@ class Forge(nn.Module):
             print()
             print("------")
 
-            p_string = ("Epoch: " + str(epoch) +
+            p_string = ("Epoch: " + str(epoch) + " " +
                         "| Mean Loss: " + str(np.round(np.mean(loss_list), 3)) +
                         "+/-" + str(np.round(np.std(loss_list), 3)) +
                         " | Time For Epoch : " + str(np.round(time.time() - epoch_start, 3)) + "s")

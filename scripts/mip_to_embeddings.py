@@ -9,16 +9,16 @@ if __name__ == "__main__":
 
     # Parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
+    parser.add_argument('--train_config_yaml', type=str, default='./forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_forge_pkl', type=str, default='/models/forge_pretrained.pkl',
+    parser.add_argument('--input_forge_pkl', type=str, default='./models/forge_pretrained.pkl',
                         help='Path to pre-trained or fine-tuned Forge pickle file')
-    parser.add_argument('--input_mips', type=str, default='/data/train/',
+    parser.add_argument('--input_mips', type=str, default='./data/train/',
                         help='Path to MIP file, directory, or model')
-    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='/models/mip_to_embeddings.pkl',
+    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='./models/mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
     parser.add_argument('--model_type', type=str, default=Constants.FORGE_PRE_TRAIN,
-                        help=('Model type to use when loading the Forge model. '
+                        help=('The type of the pretrained model to load.'
                               'Available options: ' + ', '.join([Constants.FORGE_PRE_TRAIN,
                                                                  Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                                                  Constants.FORGE_FINE_TUNE_VARIABLE_PROBA])))
@@ -27,10 +27,9 @@ if __name__ == "__main__":
     # Create Forge with its training configuration
     forge = Forge(args.train_config_yaml)
 
-    # Load pre-trained Forge model
-    forge.load_model(input_forge_pkl=args.input_forge_pkl, model_type=args.model_type)
-
     # Generate embeddings
     mip_to_embeddings_dict = mip_to_embeddings(forge=forge,
+                                               input_forge_pkl=args.input_forge_pkl,
+                                               model_type=args.model_type,
                                                input_mips=args.input_mips,
                                                output_mip_to_embeddings_pkl=args.output_mip_to_embeddings_pkl)
