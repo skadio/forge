@@ -20,6 +20,7 @@ class MIPLabeler:
     def __init__(self):
         pass
 
+    # TODO: See if I can parallelize this over multiple processes
     @staticmethod
     def get_mip_to_gapinfo(input_mip_folder,
                            output_mip_to_gapinfo_pkl,

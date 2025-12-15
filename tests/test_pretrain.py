@@ -1,5 +1,3 @@
-
-
 from forge.embeddings import Forge
 from forge.pipeline import pretrain
 from tests.test_base import BaseTest
@@ -22,7 +20,6 @@ class PretrainTest(BaseTest):
                  output_log_file=Constants.default_forge_log_file)
 
         self.assertEqual(True, True)
-        print ("Pretrain test passed.")
 
 
 if __name__ == '__main__':
