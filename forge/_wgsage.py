@@ -63,8 +63,7 @@ class EdgeWeightedSAGEConv(MessagePassing):
         return aggr_out + self.lin_root(x_root)
 
 
-def blockwise_loss(self,
-                   quantized_one: torch.Tensor,
+def blockwise_loss(quantized_one: torch.Tensor,
                    quantized_two: torch.Tensor,
                    target_adj_cpu: torch.Tensor,
                    num_cons: int,
@@ -101,7 +100,7 @@ def blockwise_loss(self,
         emphasis), suitable for backpropagation.
     """
 
-    device = self.device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     N = quantized_one.size(0)
 
     # Running sums (kept as tensors for autograd)
@@ -109,20 +108,23 @@ def blockwise_loss(self,
     sum_sq_pos = torch.zeros((), device=device)
     count_all = 0
 
-    # Process only variable rows: indices [num_cons, N)
-    for start in range(num_cons, N, batch_size):
+    # Potential TODO? 
+    # Ideally, only reconstruct either the top right or bottom left 
+    # quadrant of the bipartite adjacency block. (Look at _get_edge_index_weight in processor.py)
+    # Top right is of shape adj[:num_cons, num_cons:]
+
+
+    for start in range(0, N, batch_size):
         end = min(start + batch_size, N)
 
         # Batch × d, move to device
         block_one = quantized_one[start:end, :].to(device)
-
-        # Reconstruct bipartite edges only: variables (rows) × constraints (cols)
-        # Shape: [B, num_cons]
-        recon_block = block_one @ block_one[:num_cons, :].T
+        recon_block = block_one @ block_one.T
 
         block_two = quantized_two[start:end, :].to(device)
-        recon_block_two = block_two @ block_two[:num_cons, :].T
+        recon_block_two = block_two @ block_two.T
 
+        # Merge both reconstructions
         recon_block = recon_block @ recon_block_two.T
 
         # Min-max rescaling per block to [0, 1]
@@ -130,8 +132,7 @@ def blockwise_loss(self,
         block_max = recon_block.max()
         recon_block = (recon_block - block_min) / (block_max - block_min + 1e-8)
 
-        # Target slice: same bipartite rows/cols, moved to device
-        tgt_block = target_adj_cpu[start:end, :num_cons].to(device)
+        tgt_block = target_adj_cpu[start:end, :].to(device)
 
         # Squared error
         diff = tgt_block - recon_block

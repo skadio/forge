@@ -1,9 +1,10 @@
+
+
 from forge.embeddings import Forge
 from forge.pipeline import pretrain
 from tests.test_base import BaseTest
 
 from forge.utils import Constants
-
 
 class PretrainTest(BaseTest):
 
@@ -12,6 +13,7 @@ class PretrainTest(BaseTest):
         forge = Forge(train_config_yaml=Constants.default_train_config_yaml)
 
         # Pretrain forge
+        print ("Starting Pretrain test...")
         pretrain(forge,
                  input_mip_folder=Constants.DATA_TEST_DIR,
                  relaxation_list=[0.05, 0.01],
@@ -20,3 +22,8 @@ class PretrainTest(BaseTest):
                  output_log_file=Constants.default_forge_log_file)
 
         self.assertEqual(True, True)
+        print ("Pretrain test passed.")
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -378,10 +378,10 @@ class Forge(nn.Module):
         if self.has_variable_proba_head:
             variable_proba_head = F.sigmoid(self.variable_proba_layer(quantized))
 
-        # TODO is this sigmoid appropriate for integral gap prediction? Should it be ReLU or linear?
         integral_gap_head = None
         if self.has_integral_gap_head:
-            integral_gap_head = F.sigmoid(self.integral_gap_layer(quantized))
+            # Use linear layer only instead of sigmoid since gap ratio can be > 1
+            integral_gap_head = self.integral_gap_layer(quantized)
 
         # Training
         feature_rec_loss = None
@@ -401,12 +401,12 @@ class Forge(nn.Module):
             else:
                 adj[ei[0], ei[1]] = 1.0
 
+
             # Reconstruction Loss (other losses are calculated in training code)
             feature_rec_loss = self.lambda_node * F.mse_loss(feature_tensor, quantized_node)
 
             # Edge reconstruction loss on bipartite block, computed in blocks to allow running larger graphs
-            edge_rec_loss = blockwise_loss(self,
-                                           quantized_edge_1,
+            edge_rec_loss = blockwise_loss(quantized_edge_1,
                                            quantized_edge_2,
                                            adj,
                                            num_cons,
@@ -700,14 +700,21 @@ class Forge(nn.Module):
             self.has_integral_gap_head = True
             self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
 
-            # TODO: We already have self. Why is new Forge() needed, plus copy(). Add comments
+            # TODO: See if the stuff below can be simplified. 
+            
+            # Create new Forge object
             pre_trained = Forge()
+
+            # Load existing weights into temporary model
             pre_trained.load_model(input_forge_pretrained_pkl, model_type=Constants.FORGE_PRE_TRAIN)
 
+            # Copy parameters from old model to new model with gap head
             copy_params(old_model=pre_trained, new_model=self)
+
+            # Delete temporary model to free memory
             del pre_trained
 
-            # Ensure old model is deleted from memory
+            # Flush GPU cache to ensure old model is deleted from memory
             torch.cuda.empty_cache()
 
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
