@@ -99,6 +99,7 @@ def finetune_integral_gap(forge: Forge,
 
 def pretrain(forge: Forge,
              input_mip_folder: Optional[str],
+             filter_files_by_split: Optional[str],
              output_mip_to_mipinfo_pkl: str,
              output_forge_pretrained_pkl: str,
              output_log_file: str,
@@ -123,6 +124,8 @@ def pretrain(forge: Forge,
     input_mip_folder : str or None
         Path to a directory containing MIP files to convert to MIPInfo.
         Provide `None` if using `input_mip_to_mipinfo_pkl`.
+    filter_files_by_split : str
+        Data split to filter files by. Must be one of the keys in the data split mask file.
     output_mip_to_mipinfo_pkl : str
         Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
     output_forge_pretrained_pkl : str
@@ -172,6 +175,7 @@ def pretrain(forge: Forge,
 
         # Convert MIP files to MIPInfo objects and save to pickle
         mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
+                                             filter_files_by_split=filter_files_by_split,
                                              output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
                                              relaxation_list=relaxation_list,
                                              has_return=False)

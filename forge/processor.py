@@ -25,7 +25,7 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
+from forge.utils import check_true, Constants, overwrite_if_given, read_data_splits_from_textfile, save_pickle, load_pickle
 
 
 class MIPInfo:
@@ -143,6 +143,7 @@ class MIPProcessor:
 
     def convert_mip_to_mipinfo(self,
                                input_mip_folder: str,
+                               filter_files_by_split: str,
                                output_mip_to_mipinfo_pkl: str,
                                relaxation_list: Optional[List[float]] = None,
                                is_save_relaxed: bool = False,
@@ -154,6 +155,8 @@ class MIPProcessor:
         ----------
         input_mip_folder : str
             Path to the directory containing MIP instance files (`.mps` or `.lp`).
+        filter_files_by_split : str
+            Data split to filter files by. Must be one of the keys in the data split mask file.
         output_mip_to_mipinfo_pkl : str
             Path where the resulting pickled mapping of instance names to `MIPInfo` objects will be saved.
         relaxation_list : Optional[List[float]], default: None
@@ -177,7 +180,7 @@ class MIPProcessor:
             relaxation_list = []
 
         # Find and sort MIP instance files by size
-        sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=True)
+        sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, filter_files_by_split, is_sort_by_size=True)
 
         # Start Gurobi environment
         gurobi_env = MIPProcessor._start_gurobi_env()
@@ -403,7 +406,7 @@ class MIPProcessor:
         return gurobi_env
 
     @staticmethod
-    def get_only_mip_files(input_mip_folder: str, is_sort_by_size:bool = False) -> List[str]:
+    def get_only_mip_files(input_mip_folder: str, filter_files_by_split:str, is_sort_by_size:bool = False) -> List[str]:
         """
         Find MIP instance files in a directory and return them sorted by file size.
 
@@ -411,6 +414,8 @@ class MIPProcessor:
         ----------
         input_mip_folder : str
             Path to the directory containing MIP instance files.
+        filter_files_by_split: str
+            If provided, only include files listed in this split file.
         is_sort_by_size : bool
             If True, sorts the returned file paths by file size in ascending order/smallest first.
 
@@ -420,7 +425,24 @@ class MIPProcessor:
             Absolute paths to files with extensions `.mps` or `.lp`, optionally sorted by file size (ascending).
         """
 
+        # If filtering by split, read the allowed filenames from the split file
+        # First, read in the file containing splits 
+        data_splits = read_data_splits_from_textfile(os.path.join(Constants._DATA_DIR_NAME, Constants._DATA_SPLIT_MASK))
+        if filter_files_by_split:
+            allowed_filenames = data_splits.get(filter_files_by_split, [])
+            if not allowed_filenames:
+                raise ValueError(f"Split {filter_files_by_split} not found in {Constants._DATA_SPLIT_MASK}")
+        else:
+            allowed_filenames = None
+
         all_filenames = os.listdir(input_mip_folder)
+        print (all_filenames)
+
+        # Filter by allowed filenames if provided
+        if allowed_filenames is not None:
+            all_filenames = [fn for fn in all_filenames if fn in allowed_filenames]
+
+        # Get full paths and filter for MIP files
         all_filepaths = [os.path.join(input_mip_folder, filename) for filename in all_filenames]
         mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or
                           p.lower().endswith('.lp') or 
@@ -434,7 +456,7 @@ class MIPProcessor:
         return mip_filepaths
 
     @staticmethod
-    def get_mip_items(input_mips):
+    def get_mip_items(input_mips, filter_files_by_split=None):
         """
         Normalize input: accept a folder path, a single MIP file path, a list of paths,
         or a gurobipy Model instance (or list/mix of them).
@@ -446,7 +468,7 @@ class MIPProcessor:
             if isinstance(item, gp.Model):
                 mip_items.append(item)
             elif isinstance(item, str) and os.path.isdir(item):
-                mip_items.extend(MIPProcessor.get_only_mip_files(item, is_sort_by_size=False))
+                mip_items.extend(MIPProcessor.get_only_mip_files(item, filter_files_by_split, is_sort_by_size=False))
             elif isinstance(item, str) and os.path.isfile(item):
                 mip_items.append(item)
             else:
