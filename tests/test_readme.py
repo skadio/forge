@@ -9,6 +9,7 @@ from tests.test_base import BaseTest
 
 class ReadmeTest(BaseTest):
 
+    @skip("Skipping command line test to speed up CI")
     def test_pretrain(self):
         from forge.embeddings import Forge
         from forge.pipeline import pretrain

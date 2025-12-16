@@ -217,5 +217,8 @@ __marimo__/
 /models/forge_pretrained.pkl
 /models/forge_pretrain.log
 
+# Ignore data
+*data.zip
+
 # Ignore macOS system files
 .DS_Store
