@@ -12,11 +12,13 @@ def download_file(repo_id: str, filename: str, output_path: str, repo_type: str 
     shutil.copy(cached_path, output_path)
     print(f"Saved {filename} -> {output_path}")
 
+
 def unzip_file(zip_path: str, extract_to: str):
     import zipfile
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
     print(f"Extracted {zip_path} -> {extract_to}")
+
 
 if __name__ == "__main__":
     url = "https://huggingface.co/datasets/skadio/forge/blob/main/data.zip"
@@ -29,12 +31,11 @@ if __name__ == "__main__":
 
     download_file(repo_id=args.repo, filename=args.filename, output_path=args.output, token=args.token)
     unzip_file(zip_path=args.output, extract_to="./all_mip_data")
-    
+
     os.remove(args.output)
     print(f"Removed zip file {args.output}")
 
-    print ("Moving data to ./data/")
+    print("Moving data to ./data/")
     os.makedirs("./data", exist_ok=True)
     subprocess.call('mv ./all_mip_data ./data/', shell=True)
     print("Done.")
-    

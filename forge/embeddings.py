@@ -8,20 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import yaml
-# from vqgraph.vq import VectorQuantize
 from vector_quantize_pytorch import VectorQuantize
 
 from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
 from forge.labeler import GapInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
 from forge.utils import check_true, Constants, overwrite_if_given, copy_params
-
-
-# from dgl.nn import SAGEConv
-# DL vs PyG Key Differences to Address
-# Graph Representation: PyG uses edge indices instead of DGL graphs
-# Edge Weights: PyG passes edge weights directly to the layer
-# Bipartite Graphs: PyG requires explicit edge index tuples
 
 
 class Forge(nn.Module):
@@ -211,17 +203,6 @@ class Forge(nn.Module):
         # Set device, if GPU is available use it
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # DGL Graph layers
-        # self.graph_layer_1 = SAGEConv(self.input_dim, self.updated_input_dim,
-        #                               activation=activation, aggregator_type=self.graph_sage_aggregation)
-        # self.graph_layer_2 = SAGEConv(self.updated_input_dim, self.updated_input_dim,
-        #                               activation=activation, aggregator_type=self.graph_sage_aggregation)
-
-        # PyG SAGEConv doesn't take activation in constructor
-        # PyG delegates activation to the code rather than embedding it in the layer.
-        # self.graph_layer_1: SAGEConv = SAGEConv(self.input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
-        # self.graph_layer_2: SAGEConv = SAGEConv(self.updated_input_dim, self.updated_input_dim, aggr=self.graph_sage_aggregation)
-
         # Modified GraphSAGE to accept edge weights
         self.graph_layer_1 = EdgeWeightedSAGEConv(self.input_dim, self.updated_input_dim,
                                                   aggr=self.graph_sage_aggregation)
@@ -315,9 +296,6 @@ class Forge(nn.Module):
 
         Notes
         -----
-        - DGL usage has been decommissioned. This forward now accepts PyG-style graph inputs:
-            - `edge_index`: a `[2, E]` `torch.Tensor` containing source and target node indices.
-            - `edge_weight`: a `[E]` `torch.Tensor` of edge weights (or `None`), used by message passing.
         - Adjacency reconstruction uses two low-rank factor matrices (`quantized_edge_1`, `quantized_edge_2`)
             to approximate bipartite edges via (A A^T)(B B^T)^T then min-max rescale.
         - Feature and edge reconstruction losses are scaled by `lamb_node` and `lamb_edge`
@@ -333,8 +311,7 @@ class Forge(nn.Module):
         # List to hold intermediate layers
         h_list = []
 
-        # Decommission: DGL GraphSAGE Layer 1
-        # h = self.graph_layer_1(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
+        # GraphSAGE Layer 1
         h = self.graph_layer_1(h, edge_index, edge_weight=edge_weight)
         h = self.activation(h)  # PyG needs explicit activation
         h = self.bn1(h)
@@ -342,8 +319,7 @@ class Forge(nn.Module):
             h = self.norms[0](h)
         h = self.dropout(h)
 
-        # Decommission: DGL GraphSAGE Layer 2
-        # h = self.graph_layer_2(dgl_graph, h, edge_weight=dgl_graph.edata['weight'])
+        # GraphSAGE Layer 2
         h = self.graph_layer_2(h, edge_index, edge_weight=edge_weight)
         h = self.activation(h)  # PyG needs explicit activation
         h = self.bn2(h)
@@ -360,7 +336,6 @@ class Forge(nn.Module):
         h_list.append(h)
 
         # The same "embedding" is then passed into the vector quantizer below
-        # quantized, _, commit_loss, dist, codebook = self.vq(h) # DGL version
         quantized, indices, commit_loss = self.vq(h)
         codebook = self.vq.codebook  # or from the forward output
 
@@ -387,8 +362,6 @@ class Forge(nn.Module):
         feature_rec_loss = None
         edge_rec_loss = None
         if not self.is_eval_mode:
-            # Decommission: Get Adjacency Matrix from DGL Graph
-            # adj = dgl_graph.adjacency_matrix().to_dense().to(feature_tensor.device)
 
             # Convert PyG edge_index to dense adjacency matrix on CPU
             num_nodes = num_cons + num_vars
@@ -400,7 +373,6 @@ class Forge(nn.Module):
                 adj[ei[0], ei[1]] = ew
             else:
                 adj[ei[0], ei[1]] = 1.0
-
 
             # Reconstruction Loss (other losses are calculated in training code)
             feature_rec_loss = self.lambda_node * F.mse_loss(feature_tensor, quantized_node)
@@ -530,14 +502,12 @@ class Forge(nn.Module):
                 mipinfo = input_mipinfo_list[idx]
 
                 # Some MIP instances are too large to fit in GPU memory
-                # if mipinfo.dgl_graph.num_nodes() > max_dgl_nodes:
                 num_nodes = mipinfo.num_cons + mipinfo.num_vars
                 if num_nodes > max_graph_nodes:
                     skip_list.add(idx)
                     continue
 
                 # Push to device before the for-loop below
-                # dgl_graph = mipinfo.dgl_graph.to(self.device)
                 features = mipinfo.feature_tensor.to(self.device)
                 edge_index = mipinfo.edge_index.to(self.device)
                 edge_weight = mipinfo.edge_weight.to(self.device)
@@ -701,7 +671,7 @@ class Forge(nn.Module):
             self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
 
             # TODO: See if the stuff below can be simplified. 
-            
+
             # Create new Forge object
             pre_trained = Forge()
 
@@ -743,7 +713,6 @@ class Forge(nn.Module):
                     continue
 
                 # Push to device before the for-loop below
-                # dgl_graph = mipinfo.dgl_graph.to(self.device)
                 edge_index = mipinfo.edge_index.to(self.device)
                 edge_weight = mipinfo.edge_weight.to(self.device)
                 feature_tensor = mipinfo.feature_tensor.to(self.device)

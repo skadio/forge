@@ -13,7 +13,7 @@ class PretrainTest(BaseTest):
         # Pretrain forge
         pretrain(forge,
                  input_mip_folder=Constants.DATA_TESTS_DIR,
-                 filter_files_by_split="pretrain",
+                 input_mip_instances_file="pretrain",
                  relaxation_list=[0.05, 0.01],
                  output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                  output_forge_pretrained_pkl=Constants.default_forge_pretrained_pkl,

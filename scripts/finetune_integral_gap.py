@@ -15,6 +15,8 @@ if __name__ == "__main__":
                         help='Path to trained Forge pickle file')
     parser.add_argument('--input_mip_folder', type=str, default='/data/train/',
                         help='Path to MIP folder')
+    parser.add_argument('--input_mip_instances_file', type=str, default='./data/pretrain.txt',
+                        help='Directory containing input MIP instance files')
     parser.add_argument('--output_forge_finetuned_pkl', type=str, default='/models/forge_integral_gap.pkl',
                         help='Path to trained Forge pickle file')
     parser.add_argument('--output_mip_to_gapinfo_pkl', type=str,  default='/models/mip_to_gapinfo.pkl',
@@ -31,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=5e-4,
                         help='Weight decay for the optimizer')
     parser.add_argument('--max_graph_nodes', type=int, default=30000,
-                        help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
+                        help='Maximum number of graph nodes when converting MIP instances to bipartite graph')
     parser.add_argument('--gapinfo_time_limit', type=int, default=120,
                         help='Time limit in seconds for computing integral gap info (default: 120)')
     args = parser.parse_args()
@@ -42,6 +44,7 @@ if __name__ == "__main__":
     # Fine-tune Forge to predict integral gaps
     finetune_integral_gap(forge=forge,
                           input_forge_pkl=args.input_forge_pkl,
+                          input_mip_instances_file=args.input_mip_instances_file,
                           model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                           input_mip_folder=args.input_mip_folder,
                           output_forge_finetuned_pkl=args.output_forge_finetuned,

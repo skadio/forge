@@ -15,6 +15,8 @@ if __name__ == "__main__":
                         help='Path to pre-trained or fine-tuned Forge pickle file')
     parser.add_argument('--input_mips', type=str, default='./data/train/',
                         help='Path to MIP file, directory, or model')
+    parser.add_argument('--input_mip_instances_file', type=str, default='./data/pretrain.txt',
+                        help='Directory containing input MIP instance files')
     parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='./models/mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
     parser.add_argument('--model_type', type=str, default=Constants.FORGE_PRE_TRAIN,
@@ -32,4 +34,5 @@ if __name__ == "__main__":
                                                input_forge_pkl=args.input_forge_pkl,
                                                model_type=args.model_type,
                                                input_mips=args.input_mips,
+                                               input_mip_instances_file=args.input_mip_instances_file,
                                                output_mip_to_embeddings_pkl=args.output_mip_to_embeddings_pkl)
