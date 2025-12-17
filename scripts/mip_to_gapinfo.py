@@ -1,7 +1,7 @@
 import argparse
 
 from forge.embeddings import Forge
-from forge.pipeline import mip_to_gap_info
+from forge.pipeline import mip_to_gapinfo
 from forge.utils import Constants
 
 if __name__ == "__main__":
@@ -26,9 +26,9 @@ if __name__ == "__main__":
     forge = Forge(args.train_config_yaml)
 
     # Generate embeddings
-    mip_to_gap_info_dict = mip_to_gap_info(forge=forge,
-                                           input_forge_pkl=args.input_forge_pkl,
-                                           model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
-                                           input_mips=args.input_mips,
-                                           output_mip_to_gap_info_pkl=args.output_mip_to_gap_info_pkl,
-                                           problem_type=args.problem_type)
+    mip_to_gap_info_dict = mip_to_gapinfo(forge=forge,
+                                          input_forge_pkl=args.input_forge_pkl,
+                                          model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
+                                          input_mips=args.input_mips,
+                                          output_mip_to_gap_info_pkl=args.output_mip_to_gap_info_pkl,
+                                          problem_type=args.problem_type)
