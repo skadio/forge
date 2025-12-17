@@ -24,7 +24,7 @@ decoder_edge_dim: 32
 # Vector Quantization Parameters
 vq_decay: 0.8
 vq_commitment_weight: 0.25
-vq_is_cosine_sim: true
+vq_is_cosine_sim: false
 
 # Training Parameters
 epochs: 10
