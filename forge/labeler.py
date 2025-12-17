@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from tqdm import tqdm
 import gurobipy as gp
 
@@ -20,15 +20,16 @@ class MIPLabeler:
     def __init__(self):
         pass
 
-    # TODO: See if I can parallelize this over multiple processes
+    # TODO: See if I can parallelize this over multiple processes in pipeline.py
     @staticmethod
     def get_mip_to_gapinfo(input_mip_folder,
+                           input_mip_instances_file: Optional[str],
                            output_mip_to_gapinfo_pkl,
                            gapinfo_time_limit: int = 120,
                            gurobi_num_threads: int = 1,
                            has_return=False) -> Dict[str, GapInfo]:
 
-        mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=False)
+        mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, input_mip_instances_file, is_sort_by_size=False)
 
         # Start Gurobi environment
         gurobi_env = MIPProcessor._start_gurobi_env()

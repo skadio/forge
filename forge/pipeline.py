@@ -13,6 +13,7 @@ def finetune_integral_gap(forge: Forge,
                           input_forge_pkl: str,
                           model_type: str,
                           input_mip_folder: str,
+                          input_mip_instances_file: Optional[str],
                           output_forge_finetuned_pkl: str,
                           output_mip_to_gapinfo_pkl: str,
                           input_mip_to_gapinfo_pkl: Optional[str] = None,
@@ -83,6 +84,7 @@ def finetune_integral_gap(forge: Forge,
         # Get MIP to integral gap ratio labels for fine-tuning
         labeler = MIPLabeler()
         mip_to_gapinfo = labeler.get_mip_to_gapinfo(input_mip_folder=input_mip_folder,
+                                                    input_mip_instances_file=input_mip_instances_file,
                                                     output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
                                                     gapinfo_time_limit=gapinfo_time_limit,
                                                     gurobi_num_threads=1,
@@ -99,7 +101,7 @@ def finetune_integral_gap(forge: Forge,
 
 def pretrain(forge: Forge,
              input_mip_folder: Optional[str],
-             filter_files_by_split: Optional[str],
+             input_mip_instances_file: Optional[str],
              output_mip_to_mipinfo_pkl: str,
              output_forge_pretrained_pkl: str,
              output_log_file: str,
@@ -124,8 +126,8 @@ def pretrain(forge: Forge,
     input_mip_folder : str or None
         Path to a directory containing MIP files to convert to MIPInfo.
         Provide `None` if using `input_mip_to_mipinfo_pkl`.
-    filter_files_by_split : str
-        Data split to filter files by. Must be one of the keys in the data split mask file.
+    input_mip_instances_file : str
+        If provided, only include instances from input_mip_folder listed in the file.
     output_mip_to_mipinfo_pkl : str
         Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
     output_forge_pretrained_pkl : str
@@ -146,8 +148,8 @@ def pretrain(forge: Forge,
     weight_decay : Optional[float], optional
         Weight decay for the optimizer. If `None`, the weight decay defined in `forge`
     max_graph_nodes : Optional[int], optional
-        Maximum number of graph nodes when converting MIP instances to DGL graphs. If `None`, no
-        additional node cap is applied beyond defaults in the conversion utilities.
+        Maximum number of graph nodes when converting MIP instances to bipartite graph.
+        If `None`, no additional node cap is applied beyond defaults in the conversion utilities.
 
     Raises
     ------
@@ -175,7 +177,7 @@ def pretrain(forge: Forge,
 
         # Convert MIP files to MIPInfo objects and save to pickle
         mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
-                                             filter_files_by_split=filter_files_by_split,
+                                             input_mip_instances_file=input_mip_instances_file,
                                              output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
                                              relaxation_list=relaxation_list,
                                              has_return=False)
@@ -199,6 +201,7 @@ def mip_to_embeddings(forge: Forge,
                       input_forge_pkl: str,
                       model_type: str,
                       input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
+                      input_mip_instances_file: Optional[str],
                       output_mip_to_embeddings_pkl: str) -> Dict[str, MIPEmbeddings]:
     """
     Generate embeddings for one or more MIP inputs using a trained Forge instance.
@@ -237,7 +240,7 @@ def mip_to_embeddings(forge: Forge,
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
-    mip_items = MIPProcessor.get_mip_items(input_mips)
+    mip_items = MIPProcessor.get_mip_items(input_mips, input_mip_instances_file)
 
     # Start Gurobi environment
     gurobi_env = MIPProcessor._start_gurobi_env()
@@ -269,12 +272,13 @@ def mip_to_embeddings(forge: Forge,
     return mip_to_embeddings
 
 
-def mip_to_gap_info(forge: Forge,
-                    input_forge_pkl: str,
-                    model_type: str,
-                    input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
-                    output_mip_to_gap_info_pkl: str,
-                    problem_type: str) -> Dict[str, GapInfo]:
+def mip_to_gapinfo(forge: Forge,
+                   input_forge_pkl: str,
+                   model_type: str,
+                   input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
+                   input_mip_instances_file: Optional[str],
+                   output_mip_to_gapinfo_pkl: str,
+                   problem_type: str) -> Dict[str, GapInfo]:
     """
     Generate gap information for one or more MIP inputs using a trained Forge instance.
 
@@ -291,7 +295,9 @@ def mip_to_gap_info(forge: Forge,
         Path to a single MIP file,
         A single gurobipy model instance,
         Or a list/tuple mixing these types.
-    output_mip_to_gap_info_pkl : str
+    input_mip_instances_file : Optional[str]
+        If provided, only include instances from input_mips listed in the file.
+    output_mip_to_gapinfo_pkl : str
         Filepath where the resulting mapping from MIP identifiers to gap information will be saved (pickle).
     problem_type : str
         The type of problem for which gap information is to be computed.
@@ -316,7 +322,7 @@ def mip_to_gap_info(forge: Forge,
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
-    mip_items = MIPProcessor.get_mip_items(input_mips)
+    mip_items = MIPProcessor.get_mip_items(input_mips, input_mip_instances_file)
 
     # Start Gurobi environment
     gurobi_env = MIPProcessor._start_gurobi_env()
@@ -345,7 +351,7 @@ def mip_to_gap_info(forge: Forge,
     # Close Gurobi environment
     gurobi_env.close()
 
-    save_pickle(mip_to_gap_info, output_mip_to_gap_info_pkl)
+    save_pickle(mip_to_gap_info, output_mip_to_gapinfo_pkl)
 
     return mip_to_gap_info
 
