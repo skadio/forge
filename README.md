@@ -24,7 +24,7 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 # Pretraining log is stored in output_log_file with loss curves and training details
 pretrain(forge=forge,
          input_mip_folder="./data/",
-         input_mip_instances_file="./data/pretrain.txt",
+         input_mip_instances_file="data/configs/pretrain.txt",
          output_mip_to_mipinfo_pkl="./models/mip_to_mipinfo.pkl",
          output_forge_pretrained_pkl="./models/forge_pretrained.pkl",
          output_log_file="./models/forge_pretrained.log")
@@ -37,6 +37,7 @@ python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml
 ```
 
 ## Quick Start: Generate Embeddings
+
 ```python
 from forge.embeddings import Forge
 from forge.pipeline import mip_to_embeddings
@@ -54,7 +55,7 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 #       - embeddings_of_variable[v]: torch.Tensor(num_constraints, codebook_dim) 
 mip_to_embeddings_dict = mip_to_embeddings(forge=forge,
                                            input_mips="./data/",
-                                           input_mip_instances_file="./data/test_pretrain.txt",
+                                           input_mip_instances_file="data/configs/test_pretrain.txt",
                                            input_forge_pkl="./models/forge_pretrained.pkl",
                                            model_type=Constants.FORGE_PRE_TRAIN,
                                            output_mip_to_embeddings_pkl="./models/mip_to_embeddings.pkl")
@@ -80,7 +81,7 @@ finetune_integral_gap(forge=forge,
                       input_forge_pkl="./models/forge_pretrained.pkl",
                       model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                       input_mip_folder="./data/",
-                      input_mip_instances_file="./data/fine_tune_integral_gap.txt",
+                      input_mip_instances_file="data/configs/fine_tune_integral_gap.txt",
                       output_forge_finetuned_pkl="./models/forge_integral_gap.pkl",
                       output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl")
 ```

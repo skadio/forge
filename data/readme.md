@@ -3,7 +3,7 @@ Forge datasets are stored in [Hugging Face Forge Dataset](https://huggingface.co
 
 You can download and unzip the dataset from Hugging Face using the `/data/download.py` script. 
 
-Each `/data/*.txt` file lists the names of the instances included in a specific task:
+Each `/data/configs/*.txt` file lists the names of the instances included in a specific task:
 
 * pretrain.txt
   * test_pretrain.txt
