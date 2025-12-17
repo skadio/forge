@@ -853,7 +853,7 @@ class Forge(nn.Module):
         self.is_eval_mode = original_mode
 
         # Find LP optimal to calculate ratio
-        variable_proba = h_list[-2][mipinfo.num_cons:]
+        # variable_proba = h_list[-2][mipinfo.num_cons:]
         integral_gap = h_list[-1][mipinfo.num_cons:]
 
         gap_ratio = torch.mean(integral_gap).item()
@@ -865,6 +865,7 @@ class Forge(nn.Module):
         lp_sol = lp_model.Xn
 
         mip_obj = lp_obj
+        # TODO: Try to replace with GRB.SENSE instead of Constants.MIN_PROBLEMS/MAX_PROBLEMS
         if problem_type in Constants.MIN_PROBLEMS:
             # Minimization: interpret gap_ratio as “how close MIP is to LP”
             gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
