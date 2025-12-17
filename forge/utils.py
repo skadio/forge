@@ -26,8 +26,7 @@ class Constants(NamedTuple):
 
     # Names
     _DATA_DIR_NAME = "data"
-    _TESTING_DIR_NAME = "all_mip_data"  # All MIP data now lives in the same folder
-    _TRAINING_DIR_NAME = "all_mip_data" # All MIP data now lives in the same folder
+    _INSTANCES_DIR_NAME = "instances"
     _FORGE_DIR_NAME = "forge"
     _CONFIGS_DIR_NAME = "configs"
     _MODELS_DIR_NAME = "models"
@@ -38,13 +37,12 @@ class Constants(NamedTuple):
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"
     _FORGE_LOG_NAME = "forge_pretrain.log"
-    
+    _UNIT_TEST_INSTANCES_NAME = "instances_unit_test.txt"
+
     # Folders
     _CONST_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _DATA_DIR_NAME
-    DATA_TESTING_DIR = DATA_DIR + os.sep + _TESTING_DIR_NAME
-    DATA_TRAINING_DIR = DATA_DIR + os.sep + _TRAINING_DIR_NAME
-    DATA_TESTS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _DATA_DIR_NAME
+    DATA_INSTANCE_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _DATA_DIR_NAME + os.sep + _INSTANCES_DIR_NAME
+    DATA_TEST_INSTANCE_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _DATA_DIR_NAME + os.sep + _INSTANCES_DIR_NAME
     MODELS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _MODELS_DIR_NAME
     CONFIGS_DIR = _CONST_FILE_DIR + os.sep + ".." + os.sep + _FORGE_DIR_NAME + os.sep + _CONFIGS_DIR_NAME
 
@@ -55,6 +53,7 @@ class Constants(NamedTuple):
     default_mip_to_gapinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _GAPINFO_NAME
     default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_PKL_NAME
     default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_LOG_NAME
+    default_instances_unit_test_txt = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _DATA_DIR_NAME + os.sep + _UNIT_TEST_INSTANCES_NAME
 
 
 def params(torch_model):

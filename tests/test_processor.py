@@ -17,7 +17,8 @@ class ProcessorTest(BaseTest):
 
         # Create MIP to MIPInfo dictionary
         relaxation_list = [0.05, 0.01]
-        mip_to_mipinfo = mip_proc.convert_mip_to_mipinfo(input_mip_folder=Constants.DATA_TESTS_DIR,
+        mip_to_mipinfo = mip_proc.convert_mip_to_mipinfo(input_mip_folder=Constants.DATA_TEST_INSTANCE_DIR,
+                                                         input_mip_instances_file=Constants.default_instances_unit_test_txt,
                                                          output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                                                          relaxation_list=relaxation_list,
                                                          has_return=True)
@@ -27,8 +28,8 @@ class ProcessorTest(BaseTest):
 
         # We create one relaxed instance per relaxation ratio for each MIP instance
         # E.g., if there are 5 MIP instances and 2 relaxation ratios, we should have 15 MIPInfo objects
-        input_folder = Path(Constants.DATA_TESTS_DIR)
-        num_instances = sum(1 for p in input_folder.iterdir() if p.is_file())
+        with open(Constants.default_instances_unit_test_txt, "r") as f:
+            num_instances = sum(1 for line in f if line.strip())
         self.assertEqual(len(mipinfo_list), num_instances * (len(relaxation_list) + 1))
 
     # TEST MIPProcessor.get_mip_items()
@@ -37,7 +38,7 @@ class ProcessorTest(BaseTest):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "instance.mps"
             p.write_text("")  # create empty file
-            out = mip_proc.get_mip_items(str(p))
+            out = mip_proc.get_mip_items(str(p), input_mip_instances_file=None)
             self.assertEqual(out, [str(p)])
 
     # TEST MIPProcessor.get_mip_items()
@@ -50,7 +51,7 @@ class ProcessorTest(BaseTest):
             p1.write_text("")
             p2.write_text("")
             p3.write_text("")
-            out = mip_proc.get_mip_items(str(td))
+            out = mip_proc.get_mip_items(str(td), input_mip_instances_file=None)
             self.assertEqual(set(out), {str(p1), str(p2)})
 
     # TEST MIPProcessor.get_mip_items()
@@ -58,7 +59,7 @@ class ProcessorTest(BaseTest):
         mip_proc = MIPProcessor()
         with patch("forge.processor.gp.Model", ProcessorTest.DummyModel):
             model = ProcessorTest.DummyModel()
-            out = mip_proc.get_mip_items(model)
+            out = mip_proc.get_mip_items(model, input_mip_instances_file=None)
             self.assertEqual(out, [model])
 
     # TEST MIPProcessor.get_mip_items()
@@ -68,7 +69,7 @@ class ProcessorTest(BaseTest):
             p = Path(td) / "f.mps"
             p.write_text("")
             model = ProcessorTest.DummyModel()
-            out = mip_proc.get_mip_items([model, str(p)])
+            out = mip_proc.get_mip_items([model, str(p)], input_mip_instances_file=None)
             # first item should be the model object, second (or present) should be the path
             self.assertIn(model, out)
             self.assertIn(str(p), out)
@@ -79,4 +80,4 @@ class ProcessorTest(BaseTest):
         with tempfile.TemporaryDirectory() as td:
             fake = str(Path(td) / "does_not_exist.mps")
             with self.assertRaises(ValueError):
-                mip_proc.get_mip_items(fake)
+                mip_proc.get_mip_items(fake, input_mip_instances_file=None)

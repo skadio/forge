@@ -20,6 +20,7 @@ class ReadmeTest(BaseTest):
         # Pretrain Forge on a set of MIP instances
         pretrain(forge=forge,
                  input_mip_folder=Constants.DATA_TRAINING_DIR,
+                 input_mip_instances_file=Constants.default_instances_unit_test_txt,
                  output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                  output_forge_pretrained_pkl=Constants.default_forge_pretrained_pkl,
                  output_log_file=Constants.default_forge_log_file,
@@ -37,7 +38,8 @@ class ReadmeTest(BaseTest):
             "-m",
             "scripts.pretrain",
             "--train_config_yaml", os.path.join(project_root, "forge", "configs", "train_config.yaml"),
-            "--input_mip_folder", os.path.join(project_root, "data", "train"),
+            "--input_mip_folder", os.path.join(project_root, "data", "instances"),
+            "--input_mip_instances_file", os.path.join(project_root, "data", "configs", "pretrain.txt"),
             "--output_mip_to_mipinfo_pkl", os.path.join(project_root, "models", "mip_to_mipinfo.pkl"),
             "--output_forge_pretrained_pkl", os.path.join(project_root, "models", "forge_pretrained.pkl"),
             "--output_log_file", os.path.join(project_root, "models", "forge_pretrained.log"),
