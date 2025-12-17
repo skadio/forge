@@ -286,10 +286,9 @@ class Forge(nn.Module):
         loss : torch.Tensor | int
             Scalar reconstruction + commitment loss (and edge positive emphasis term) if `eval_only=False`;
             set to -1 when `eval_only=True` to signal inference-only mode.
-        dist : torch.Tensor
-            Distance matrix of shape (N, codebook_size) after squeeze,
-            containing distances from each node embedding to every code vector.
-            Used for computing code assignments and MIP instance distribution vectors.
+        indices : torch.Tensor
+            Code assignments for each node in the graph.
+            Shape: [N, 1] where N is the number of nodes.
         codebook : torch.Tensor | Tuple[torch.Tensor, torch.Tensor]
             If `separate_codebooks=False`, a single codebook tensor of shape (codebook_size, codebook_dim).
             Otherwise, a tuple `(codebook_node, codebook_edge)` each with that shape.
@@ -339,11 +338,6 @@ class Forge(nn.Module):
         quantized, indices, commit_loss = self.vq(h)
         codebook = self.vq.codebook  # or from the forward output
 
-        # Squared Euclidean distances: [N, K]
-        x_norm = (h ** 2).sum(dim=-1, keepdim=True)  # [N, 1]
-        c_norm = (codebook ** 2).sum(dim=-1).unsqueeze(0)  # [1, K]
-        distances = x_norm + c_norm - 2 * h @ codebook.t()  # [N, K]
-
         quantized_node = self.decoder_node(quantized)
         quantized_edge_1 = self.decoder_edge_1(quantized)
         quantized_edge_2 = self.decoder_edge_2(quantized)
@@ -385,8 +379,6 @@ class Forge(nn.Module):
                                            lambda_edge=self.lambda_edge,
                                            batch_size=self.adj_block_size)
 
-        # Distance Matrix - Distance From Each Node's Embedding to Each Code in the Codebook
-        dist = torch.squeeze(distances)
 
         h_list.append(quantized)
         h_list.append(quantized_node)
@@ -402,7 +394,7 @@ class Forge(nn.Module):
         else:
             loss = -1
 
-        return h_list, h, loss, dist, codebook
+        return h_list, h, loss, indices, codebook
 
     def load_model(self, input_forge_pkl, model_type=Constants.FORGE_PRE_TRAIN):
 
@@ -497,6 +489,7 @@ class Forge(nn.Module):
 
             # MIP instances in dataset
             loss = None
+            print ()
             for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
@@ -514,7 +507,7 @@ class Forge(nn.Module):
 
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(features,
+                    h_list, logits, loss, indices, codebook_ = self.forward(features,
                                                                               mipinfo.num_cons, mipinfo.num_vars,
                                                                               edge_index, edge_weight)
 
@@ -560,7 +553,7 @@ class Forge(nn.Module):
         -----
         - Convert `mip_model` to `MIPInfo` (PyG style).
         - Call `forward()` in eval mode.
-        - Build instance code histogram from `dist` assignments and extract per-node quantized embeddings.
+        - Build instance code histogram from `indices` assignments and extract per-node quantized embeddings.
 
         Parameters
         ----------
@@ -599,7 +592,7 @@ class Forge(nn.Module):
         mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
         # Forward pass through trained Forge
-        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+        h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
                                                                   mipinfo.num_cons, mipinfo.num_vars,
                                                                   mipinfo.edge_index.to(self.device),
                                                                   mipinfo.edge_weight.to(self.device))
@@ -607,7 +600,7 @@ class Forge(nn.Module):
         self.is_eval_mode = original_mode
 
         # Compute mip instance vector, as a frequency distribution of codes assigned to constraints and variables
-        assigned_codes = torch.argmin(distances, axis=1).detach().cpu().numpy()
+        assigned_codes = indices.detach().cpu().numpy()
         # instance_embedding = np.zeros(self.codebook_size, )
         # for c in assigned_codes:
         #     instance_embedding[c] += 1
@@ -722,7 +715,7 @@ class Forge(nn.Module):
                     optimizer.zero_grad()
 
                     # Compute loss and prediction
-                    h_list, logits, loss, distances, codebook_ = self.forward(feature_tensor, mipinfo.num_cons,
+                    h_list, logits, loss, indices, codebook_ = self.forward(feature_tensor, mipinfo.num_cons,
                                                                               mipinfo.num_vars, edge_index, edge_weight)
                     # Predict gap ratio
                     # h_list[-1] is the integral gap head output
@@ -814,7 +807,7 @@ class Forge(nn.Module):
         mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
         # Forward pass through trained Forge
-        h_list, logits, loss, distances, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+        h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
                                                                   mipinfo.num_cons, mipinfo.num_vars,
                                                                   mipinfo.edge_index.to(self.device),
                                                                   mipinfo.edge_weight.to(self.device))
