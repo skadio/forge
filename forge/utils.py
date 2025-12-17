@@ -38,7 +38,6 @@ class Constants(NamedTuple):
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"
     _FORGE_LOG_NAME = "forge_pretrain.log"
-    _DATA_SPLIT_MASK = "data_splits_to_mip_instances.txt" # This file contains the data split masks for various experiments
     
     # Folders
     _CONST_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
