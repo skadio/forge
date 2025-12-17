@@ -220,6 +220,7 @@ __marimo__/
 # Ignore data
 *data.zip
 data/all_mip_data/
+data/instances/
 
 # Ignore macOS system files
 .DS_Store
