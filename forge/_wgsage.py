@@ -132,7 +132,8 @@ def blockwise_loss(quantized_one: torch.Tensor,
         block_max = recon_block.max()
         recon_block = (recon_block - block_min) / (block_max - block_min + 1e-8)
 
-        tgt_block = target_adj_cpu[start:end, :].to(device)
+        # Target slice: match the local [B, B] block we reconstructed
+        tgt_block = target_adj_cpu[start:end, start:end].to(device)
 
         # Squared error
         diff = tgt_block - recon_block

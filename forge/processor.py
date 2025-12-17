@@ -187,7 +187,7 @@ class MIPProcessor:
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_mip_files))):
 
-            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
+            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
 
             # Read MIP file to a Gurobi model
             mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
@@ -236,7 +236,7 @@ class MIPProcessor:
                     # Release copy model
                     mip_model_relaxed.dispose()
 
-            print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx])
+            print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
 
         # Close Gurobi environment
         gurobi_env.close()
