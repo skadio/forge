@@ -216,6 +216,9 @@ __marimo__/
 /models/mip_to_gapinfo.pkl
 /models/forge_pretrained.pkl
 /models/forge_pretrain.log
+/models/unit_test_mip_to_mipinfo.pkl
+/models/unit_test_forge_pretrained.pkl
+/models/mip_to_embeddings.pkl
 
 # Ignore data
 *data.zip
