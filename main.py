@@ -2,12 +2,13 @@ import modal
 
 forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
-    "pip install gurobi numpy huggingface-hub pandas pyyaml scikit-learn scipy",
+    "pip install gurobipy numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-)
+).add_local_dir(".", "/git_forge", ignore=["./data", "./tests"])
 
 # Create Modal app
-app = modal.App("forge_312", image=forge_image)
+app = modal.App("Forge", image=forge_image)
+
 
 @app.function()
 def run():
@@ -24,24 +25,66 @@ def run():
     for v in m.getVars():
         print(f"{v.VarName} {v.X:g}")
     print(f"Obj: {m.ObjVal:g}")
+
+    import os, subprocess
+
+    current_dir = os.getcwd()
+    print("Current directory:", current_dir)
+
+    # Parent directory
+    parent_dir = os.path.dirname(current_dir)
+    print("Parent directory:", parent_dir)
+
+    # List contents of current directory using subprocess
+    print("\nContents of current directory:")
+    subprocess.run(["ls", "-l", current_dir])
+
+    print("\nContents of parent directory:")
+    subprocess.run(["ls", "-l", parent_dir])
+
+    from forge.embeddings import Forge
+    from forge.pipeline import pretrain
+
+    forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
     return m.ObjVal
 
+@app.function(volumes={"/my_vol": modal.Volume.from_name("data")})
+def list_data():
+    import os, subprocess
+
+    current_dir = os.getcwd()
+    print("Current directory:", current_dir)
+
+    print("List /my_vol:")
+    os.listdir("/my_vol")
+
+    # Parent directory
+    parent_dir = os.path.dirname(current_dir)
+    print("Parent directory:", parent_dir)
+
+    # List contents of current directory using subprocess
+    print("\nContents of current directory:")
+    subprocess.run(["ls", "-l", current_dir])
+
+    print("\nContents of parent directory:")
+    subprocess.run(["ls", "-l", parent_dir])
 
 # > modal run main.py
 @app.local_entrypoint()
 def main():
     # run locally
-    print(run.local())
+    # print(run.local())
 
     # # run remotely on Modal
     # print(run.remote())
+    list_data.remote()
 
     # # run remotely on Modal in parallel
     # total = 0
     # for ret in f.map(range(10)):
     #     total += ret
     # print(total)
-
 
 # Define CUDA base image tag
 # cuda_version = "12.4.1"
@@ -88,3 +131,14 @@ def main():
 #     )
 #     .env({"PATH": "/opt/conda/bin:" + "$PATH"})
 # )
+
+
+# modal volume create data
+# Created Volume 'data' in environment 'None'.
+# Code example:
+# @app.function(volumes={"/my_vol": modal.Volume.from_name("data")})
+# def some_func():
+#     os.listdir("/my_vol")
+# modal volume list
+# modal volume put data . (inside forge/data/)
+# modal volume ls data
