@@ -116,7 +116,7 @@ class MIPLabeler:
                            output_mip_to_gapinfo_pkl,
                            gapinfo_time_limit: int = 120,
                            gurobi_num_threads: int = 1,
-                           num_parallel_workers: int = 1,
+                           num_parallel_workers: int = 5,
                            has_return=False) -> Dict[str, GapInfo]:
 
         mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, input_mip_instances_file, is_sort_by_size=False)

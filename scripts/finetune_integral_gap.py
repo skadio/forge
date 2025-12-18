@@ -36,6 +36,8 @@ if __name__ == "__main__":
                         help='Maximum number of graph nodes when converting MIP instances to bipartite graph')
     parser.add_argument('--gapinfo_time_limit', type=int, default=120,
                         help='Time limit in seconds for computing integral gap info (default: 120)')
+    parser.add_argument('--num_parallel_workers', type=int, default=5,
+                        help='Number of parallel workers to use for processing MIP instances')
     args = parser.parse_args()
 
     # Forge model ready for fine-tuning
@@ -55,4 +57,5 @@ if __name__ == "__main__":
                           learning_rate=args.learning_rate,
                           weight_decay=args.weight_decay,
                           max_graph_nodes=args.max_graph_nodes,
-                          gapinfo_time_limit=args.gapinfo_time_limit)
+                          gapinfo_time_limit=args.gapinfo_time_limit, 
+                          num_parallel_workers=args.num_parallel_workers)

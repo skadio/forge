@@ -83,7 +83,8 @@ finetune_integral_gap(forge=forge,
                       input_mip_folder="./data/instances/",
                       input_mip_instances_file="./data/configs/fine_tune_integral_gap.txt",
                       output_forge_finetuned_pkl="./models/forge_integral_gap.pkl",
-                      output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl")
+                      output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
+                      num_parallel_workers = 5)
 ```
 
 ##### Command Line

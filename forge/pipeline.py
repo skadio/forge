@@ -22,7 +22,8 @@ def finetune_integral_gap(forge: Forge,
                           learning_rate: Optional[float] = None,
                           weight_decay: Optional[float] = None,
                           max_graph_nodes: Optional[int] = None,
-                          gapinfo_time_limit: int = 120) -> None:
+                          gapinfo_time_limit: int = 120,
+                          num_parallel_workers: Optional[int] = 5) -> None:
     """Fine-tune a pre-trained Forge model for integrality gap prediction from a folder of MIP files.
 
     Parameters
@@ -54,6 +55,8 @@ def finetune_integral_gap(forge: Forge,
         Maximum number of graph nodes allowed.
     gapinfo_time_limit : int, default=120
         Time limit (in seconds) for computing gap information for each MIP instance.
+    num_parallel_workers : Optional[int], default=5
+        Number of parallel workers to use for processing MIP instances.
 
     Returns
     -------
@@ -88,6 +91,7 @@ def finetune_integral_gap(forge: Forge,
                                                     output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
                                                     gapinfo_time_limit=gapinfo_time_limit,
                                                     gurobi_num_threads=1,
+                                                    num_parallel_workers=num_parallel_workers,
                                                     has_return=True)
 
     # Fine-tune the Forge model
