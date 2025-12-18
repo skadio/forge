@@ -622,7 +622,8 @@ class Forge(nn.Module):
                                steps_per_instance: Optional[int] = None,  # 10,
                                learning_rate: Optional[float] = None,  # 1e-4,
                                weight_decay: Optional[float] = None,  # 5e-4,
-                               max_graph_nodes: Optional[int] = None  # 30000
+                               max_graph_nodes: Optional[int] = None,  # 30000
+                               input_forge_pretrained_pkl: str = ""
                                ) -> None:
         """Fine-tune the Forge model for integral gap prediction.
 
@@ -658,7 +659,7 @@ class Forge(nn.Module):
         self.to(self.device)
         self.train()
 
-        if self.is_trained and not self.has_integral_gap_head:
+        if self.is_trained and not self.has_integral_gap_head and input_forge_pretrained_pkl != "":
             print("Warning: Forge model has been pre-trained but missing integral gap head, adding head.")
             self.has_integral_gap_head = True
             self.integral_gap_layer = nn.Linear(self.updated_input_dim, 1)
