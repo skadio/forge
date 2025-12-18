@@ -489,7 +489,7 @@ class Forge(nn.Module):
 
             # MIP instances in dataset
             loss = None
-            print ()
+            print()
             for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]

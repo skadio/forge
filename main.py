@@ -2,9 +2,8 @@ import modal
 
 forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
-    "pip install numpy pandas pyyaml scikit-learn scipy",
+    "pip install gurobi numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-    "pip install gurobi"
 )
 
 # Create Modal app

@@ -18,8 +18,8 @@ classifiers = [
 ]
 dependencies = [
     "gurobipy",
-    "numpy",
     "huggingface-hub",
+    "numpy",
     "pandas",
     "pyyaml",
     "scikit-learn",
