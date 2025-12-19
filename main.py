@@ -1,74 +1,42 @@
 import modal
 
+# Manually create a mount of all instances from command line
+# Create: modal volume create instances
+# List: modal volume list
+# Upload: modal volume put instances . (inside forge/data/instances)
+# LS: modal volume ls data
+# modal volume rename data instances
+#  modal volume rm instances configs -r
+instances_volume = modal.Volume.from_name("instances")
+
+# Create a modal image and install libraries
+# Copy the current folder/repo, except main.py fiel
 forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
     "pip install gurobipy numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-).add_local_dir(".", "/git_forge", ignore=["./data", "./tests"])
+).add_local_dir(".", "/root/", ignore=["./data/instances/", "./tests", "./main.py",
+                                       "./.git", "./.idea", "./__pycache__", "./data/__pycache__"
+                                       "./forge/__pycache__", "./experiments/__pycache__"])
 
 # Create Modal app
 app = modal.App("Forge", image=forge_image)
 
 
-@app.function()
+@app.function(volumes={"/root/data/instances": instances_volume})
 def run():
-    import gurobipy as gp
-    from gurobipy import GRB
-    m = gp.Model("mip1")
-    x = m.addVar(vtype=GRB.BINARY, name="x")
-    y = m.addVar(vtype=GRB.BINARY, name="y")
-    z = m.addVar(vtype=GRB.BINARY, name="z")
-    m.setObjective(x + y + 2 * z, GRB.MAXIMIZE)
-    m.addConstr(x + 2 * y + 3 * z <= 4, "c0")
-    m.addConstr(x + y >= 1, "c1")
-    m.optimize()
-    for v in m.getVars():
-        print(f"{v.VarName} {v.X:g}")
-    print(f"Obj: {m.ObjVal:g}")
-
     import os, subprocess
 
     current_dir = os.getcwd()
+    # parent_dir = os.path.dirname(current_dir)
     print("Current directory:", current_dir)
-
-    # Parent directory
-    parent_dir = os.path.dirname(current_dir)
-    print("Parent directory:", parent_dir)
-
-    # List contents of current directory using subprocess
-    print("\nContents of current directory:")
     subprocess.run(["ls", "-l", current_dir])
-
-    print("\nContents of parent directory:")
-    subprocess.run(["ls", "-l", parent_dir])
 
     from forge.embeddings import Forge
     from forge.pipeline import pretrain
 
     forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 
-    return m.ObjVal
-
-@app.function(volumes={"/my_vol": modal.Volume.from_name("data")})
-def list_data():
-    import os, subprocess
-
-    current_dir = os.getcwd()
-    print("Current directory:", current_dir)
-
-    print("List /my_vol:")
-    os.listdir("/my_vol")
-
-    # Parent directory
-    parent_dir = os.path.dirname(current_dir)
-    print("Parent directory:", parent_dir)
-
-    # List contents of current directory using subprocess
-    print("\nContents of current directory:")
-    subprocess.run(["ls", "-l", current_dir])
-
-    print("\nContents of parent directory:")
-    subprocess.run(["ls", "-l", parent_dir])
 
 # > modal run main.py
 @app.local_entrypoint()
