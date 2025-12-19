@@ -3,6 +3,7 @@ from multiprocessing import get_context
 from functools import partial
 from tqdm import tqdm
 import gurobipy as gp
+import os
 
 from forge.processor import MIPProcessor
 from forge.utils import save_pickle

@@ -24,7 +24,8 @@ import yaml
 from tqdm import tqdm
 
 from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
-
+from multiprocessing import get_context
+from functools import partial
 
 class MIPInfo:
     """
@@ -144,7 +145,8 @@ class MIPProcessor:
                                output_mip_to_mipinfo_pkl: str,
                                relaxation_list: Optional[List[float]] = None,
                                is_save_relaxed: bool = False,
-                               has_return: bool = False) -> Optional[Dict[str, MIPInfo]]:
+                               has_return: bool = False, 
+                               num_parallel_workers: int = 2) -> Optional[Dict[str, MIPInfo]]:
         """
         Converts MIP instances in a given folder to MIPInfo objects and saves them to a pickle file.
 
@@ -168,7 +170,7 @@ class MIPProcessor:
 
         Returns
         -------
-        Optional[Dict[str, List[Any]]]
+        Optional[Dict[str, MIPInfo]]
             The dictionary mapping instance file paths (or relaxed names) to `MIPInfo` when `has_return` is True;
             Otherwise None.
         """
@@ -176,93 +178,214 @@ class MIPProcessor:
         if relaxation_list is None:
             relaxation_list = []
 
+        # Normalize worker count
+        if not num_parallel_workers or num_parallel_workers < 1:
+            num_parallel_workers = 1
+
         # Find and sort MIP instance files by size
         sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, input_mip_instances_file,
                                                            is_sort_by_size=True)
 
-        # Start Gurobi environment
-        gurobi_env = MIPProcessor._start_gurobi_env()
+        if num_parallel_workers == 1:
+            print(f"Processing {len(sorted_mip_files)} MIP instances sequentially.")
+            # Start Gurobi environment
+            gurobi_env = MIPProcessor._start_gurobi_env()
 
-        # Convert each MIP instance to MIPInfo object and store in dictionary
-        mip_to_mipinfo = {}
-        for idx in tqdm(range(len(sorted_mip_files))):
+            # Convert each MIP instance to MIPInfo object and store in dictionary
+            mip_to_mipinfo = {}
+            for idx in tqdm(range(len(sorted_mip_files))):
 
-            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
+                print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
 
-            # Read MIP file to a Gurobi model
-            mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
+                # Read MIP file to a Gurobi model
+                mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
 
-            # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-            try:
-                mipinfo = self._mip_model_to_mipinfo(mip_model)
-            except Exception as e:
-                print(f"Warning: Failed to convert MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
-                continue
+                # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
+                try:
+                    mipinfo = self._mip_model_to_mipinfo(mip_model)
+                except Exception as e:
+                    print(f"Warning: Failed to convert MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
+                    continue
 
-            mipinfo.instance_name = sorted_mip_files[idx]
-            mip_to_mipinfo[mipinfo.instance_name] = mipinfo
+                mipinfo.instance_name = sorted_mip_files[idx]
+                mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
-            if relaxation_list:
-                for ratio in relaxation_list:
+                if relaxation_list:
+                    relaxed_mipinfo = self.get_relaxed_mipinfo(mip_model, sorted_mip_files[idx], relaxation_list, is_save_relaxed)
+                    if relaxed_mipinfo:
+                        mip_to_mipinfo.update(relaxed_mipinfo)
 
-                    # Create a copy of the original model to remove constraints from
-                    mip_model_relaxed = mip_model.copy()
-                    cons = mip_model_relaxed.getConstrs()
+                print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
 
-                    # Choose a random number of constraints within the ratio to remove
-                    k = int(len(cons) * ratio)
-                    if k <= 0:
+            # Close Gurobi environment
+            gurobi_env.close()
+        else:
+            print(f"Processing {len(sorted_mip_files)} MIP instances in parallel with "
+                  f"{num_parallel_workers} workers.")
+
+            # Parallel path using multiprocessing with the requested number of workers
+            ctx = get_context("spawn")
+            with ctx.Pool(processes=num_parallel_workers) as pool:
+                worker = partial(
+                    MIPProcessor._run_mip_model_to_mipinfo,
+                    is_save_relaxed=is_save_relaxed,
+                    relaxation_list=relaxation_list,
+                    rng_seed=self.seed,
+                )
+
+                mip_to_mipinfo = {}
+                for result in tqdm(pool.imap_unordered(worker, sorted_mip_files), total=len(sorted_mip_files)):
+                    if result is None:
                         continue
-
-                    # Removing constraints might lead to an exception, repeat until success
-                    success = False
-                    while not success:
-                        try:
-                            # Choose a random subset of constraints
-                            cons_remove_ = self.rng.choice(cons, k, replace=False)
-
-                            # Remove them from the copy model
-                            for c in cons_remove_:
-                                mip_model_relaxed.remove(c)
-                            mip_model_relaxed.update()
-                            success = True
-                        except Exception as e:
-                            print(f"Retrying due to exception: {e}")
-
-                    # Generate MIPInfo object from relaxed model, set name, and add to dictionary
-                    try:
-                        mipinfo = self._mip_model_to_mipinfo(mip_model_relaxed)
-                    except Exception as e:
-                        print(f"Warning: Failed to convert RELAXED MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
-                        continue
-
-                    # Generate relaxation name. Handle double extensions ".lp.gz" etc.
-                    orig_path = sorted_mip_files[idx]
-                    base, ext = os.path.splitext(orig_path)
-                    if ext == ".gz":
-                        base2, ext2 = os.path.splitext(base)
-                        mipinfo.instance_name = f"{base2}_relaxed_{ratio}{ext2}{ext}"
                     else:
-                        mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
-
-                    # Store mipinfo
-                    mip_to_mipinfo[mipinfo.instance_name] = mipinfo
-
-                    # Save the perturbed MIP instance to disk
-                    if is_save_relaxed:
-                        mip_model_relaxed.write(mipinfo.instance_name)
-
-                    # Release copy model
-                    mip_model_relaxed.dispose()
-
-            print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
-
-        # Close Gurobi environment
-        gurobi_env.close()
-
+                        mip_to_mipinfo.update(result)
+                    
         save_pickle(mip_to_mipinfo, output_mip_to_mipinfo_pkl)
 
         return mip_to_mipinfo if has_return else None
+    
+    @staticmethod
+    def _run_mip_model_to_mipinfo(mip_file: str,
+                                  is_save_relaxed: bool,
+                                  relaxation_list: List[float],
+                                  rng_seed: int) -> Optional[Dict[str, MIPInfo]]:
+        """
+        Worker function to convert a MIP file to MIPInfo, optionally generating relaxed versions.
+        Parameters
+        ----------
+        mip_file : str
+            Path to the MIP instance file.
+        is_save_relaxed : bool
+            If True, relaxed MIP instances are written to disk.
+        relaxation_list : List[float]
+            List of relaxation ratios to generate relaxed instances.
+        rng_seed : int  
+            Seed for random number generator.
+        Returns
+        -------
+        Optional[Dict[str, MIPInfo]]
+            Mapping of instance names to MIPInfo objects, or None on failure.
+        """
+
+        gurobi_env = None
+        try:
+            # Local RNG for this worker (can be None for non-deterministic behavior)
+            rng = np.random.default_rng(rng_seed)
+
+            # Start Gurobi environment
+            gurobi_env = MIPProcessor._start_gurobi_env()
+
+            # Read MIP file to a Gurobi model
+            mip_model = gp.read(mip_file, env=gurobi_env)
+
+            mip_to_mipinfo: Dict[str, MIPInfo] = {}
+
+            # Generate MIPInfo object from Gurobi model
+            mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+            if mipinfo is False:
+                return None
+
+            mipinfo.instance_name = mip_file
+
+            if relaxation_list:
+                relaxed_mipinfo = MIPProcessor._get_relaxed_mipinfo_with_rng(
+                    mip_model=mip_model,
+                    mip_name=mip_file,
+                    relaxation_list=relaxation_list,
+                    is_save_relaxed=is_save_relaxed,
+                    rng=rng,
+                )
+                if relaxed_mipinfo:
+                    mip_to_mipinfo.update(relaxed_mipinfo)
+
+            mip_to_mipinfo[mipinfo.instance_name] = mipinfo
+            return mip_to_mipinfo
+
+        except Exception as e:
+            print(f"Warning: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
+            return None
+        finally:   
+            if gurobi_env is not None:
+                gurobi_env.close()
+
+    def get_relaxed_mipinfo(self,
+                            mip_model,
+                            mip_name,
+                            relaxation_list: List[float],
+                            is_save_relaxed: bool) -> Dict[str, MIPInfo]:
+        """Instance wrapper that uses the processor's RNG for relaxations."""
+
+        return MIPProcessor._get_relaxed_mipinfo_with_rng(
+            mip_model=mip_model,
+            mip_name=mip_name,
+            relaxation_list=relaxation_list,
+            is_save_relaxed=is_save_relaxed,
+            rng=self.rng,
+        )
+
+    @staticmethod
+    def _get_relaxed_mipinfo_with_rng(mip_model,
+                                      mip_name,
+                                      relaxation_list: List[float],
+                                      is_save_relaxed: bool,
+                                      rng: np.random.Generator) -> Dict[str, MIPInfo]:
+
+        mip_to_mipinfo: Dict[str, MIPInfo] = {}
+        for ratio in relaxation_list:
+            # Create a copy of the original model to remove constraints from
+            mip_model_relaxed = mip_model.copy()
+            cons = mip_model_relaxed.getConstrs()
+
+            # Choose a random number of constraints within the ratio to remove
+            k = int(len(cons) * ratio)
+            if k <= 0:
+                mip_model_relaxed.dispose()
+                continue
+
+            # Removing constraints might lead to an exception, repeat until success
+            success = False
+            while not success:
+                try:
+                    # Choose a random subset of constraints
+                    cons_remove_ = rng.choice(cons, k, replace=False)
+
+                    # Remove them from the copy model
+                    for c in cons_remove_:
+                        mip_model_relaxed.remove(c)
+                    mip_model_relaxed.update()
+                    success = True
+                except Exception as e:
+                    print(f"Retrying due to exception while relaxing {mip_name}: {e}")
+
+            # Generate MIPInfo object from relaxed model, set name, and add to dictionary
+            try:
+                mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model_relaxed)
+            except Exception as e:
+                print(f"Warning: Failed to convert RELAXED MIP {mip_name} to MIPInfo due to error: {e}")
+                mip_model_relaxed.dispose()
+                continue
+
+            # Generate relaxation name. Handle double extensions ".lp.gz" etc.
+            orig_path = mip_name
+            base, ext = os.path.splitext(orig_path)
+            if ext == ".gz":
+                base2, ext2 = os.path.splitext(base)
+                mipinfo.instance_name = f"{base2}_relaxed_{ratio}{ext2}{ext}"
+            else:
+                mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
+
+            # Store mipinfo
+            mip_to_mipinfo[mipinfo.instance_name] = mipinfo
+
+            # Save the perturbed MIP instance to disk
+            if is_save_relaxed:
+                mip_model_relaxed.write(mipinfo.instance_name)
+
+            # Release copy model
+            mip_model_relaxed.dispose()
+
+        return mip_to_mipinfo
+
 
     @staticmethod
     def load_mipinfo_from_pickles(mip_to_mipinfo_files: List[str]) -> List[MIPInfo]:
