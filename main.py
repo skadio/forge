@@ -8,14 +8,18 @@ import modal
 # modal volume rename data instances
 #  modal volume rm instances configs -r
 instances_volume = modal.Volume.from_name("instances")
+models_volume = modal.Volume.from_name("models")
 
 # Create a modal image and install libraries
-# Copy the current folder/repo, except main.py fiel
+# Copy the current folder/repo, except main.py file
 forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
     "pip install gurobipy numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-).add_local_dir(".", "/root/", ignore=["./data/instances/", "./tests", "./main.py",
+).add_local_dir(".", "/root/", ignore=["./main.py", # This will be copied when running modal on main.py
+                                       "./data/instances/", "./models", # these will come from Volumes
+                                       "./experiments", "./tests", # not needed
+                                       "./CHANGELOG.txt", "./LICENSE", ".MANIFEST.in", "./README.md" 
                                        "./.git", "./.idea", "./__pycache__", "./data/__pycache__"
                                        "./forge/__pycache__", "./experiments/__pycache__"])
 
@@ -23,7 +27,8 @@ forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
 app = modal.App("Forge", image=forge_image)
 
 
-@app.function(volumes={"/root/data/instances": instances_volume})
+@app.function(volumes={"/root/data/instances": instances_volume,
+                       "/root/models/": models_volume})
 def run():
     import os, subprocess
 
@@ -45,8 +50,7 @@ def main():
     # print(run.local())
 
     # # run remotely on Modal
-    # print(run.remote())
-    list_data.remote()
+    run.remote()
 
     # # run remotely on Modal in parallel
     # total = 0
@@ -99,14 +103,3 @@ def main():
 #     )
 #     .env({"PATH": "/opt/conda/bin:" + "$PATH"})
 # )
-
-
-# modal volume create data
-# Created Volume 'data' in environment 'None'.
-# Code example:
-# @app.function(volumes={"/my_vol": modal.Volume.from_name("data")})
-# def some_func():
-#     os.listdir("/my_vol")
-# modal volume list
-# modal volume put data . (inside forge/data/)
-# modal volume ls data

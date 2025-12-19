@@ -187,7 +187,7 @@ class MIPProcessor:
         mip_to_mipinfo = {}
         for idx in tqdm(range(len(sorted_mip_files))):
 
-            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
+            print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
 
             # Read MIP file to a Gurobi model
             mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
@@ -214,19 +214,38 @@ class MIPProcessor:
                     if k <= 0:
                         continue
 
-                    # Choose a random subset of constraints
-                    cons_remove_ = self.rng.choice(cons, k, replace=False)
+                    # Removing constraints might lead to an exception, repeat until success
+                    success = False
+                    while not success:
+                        try:
+                            # Choose a random subset of constraints
+                            cons_remove_ = self.rng.choice(cons, k, replace=False)
 
-                    # Remove them from the copy model
-                    for c in cons_remove_:
-                        mip_model_relaxed.remove(c)
-                    mip_model_relaxed.update()
+                            # Remove them from the copy model
+                            for c in cons_remove_:
+                                mip_model_relaxed.remove(c)
+                            mip_model_relaxed.update()
+                            success = True
+                        except Exception as e:
+                            print(f"Retrying due to exception: {e}")
 
                     # Generate MIPInfo object from relaxed model, set name, and add to dictionary
-                    mipinfo = self._mip_model_to_mipinfo(mip_model_relaxed)
+                    try:
+                        mipinfo = self._mip_model_to_mipinfo(mip_model_relaxed)
+                    except Exception as e:
+                        print(f"Warning: Failed to convert RELAXED MIP {sorted_mip_files[idx]} to MIPInfo due to error: {e}")
+                        continue
+
+                    # Generate relaxation name. Handle double extensions ".lp.gz" etc.
                     orig_path = sorted_mip_files[idx]
                     base, ext = os.path.splitext(orig_path)
-                    mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
+                    if ext == ".gz":
+                        base2, ext2 = os.path.splitext(base)
+                        mipinfo.instance_name = f"{base2}_relaxed_{ratio}{ext2}{ext}"
+                    else:
+                        mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
+
+                    # Store mipinfo
                     mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
                     # Save the perturbed MIP instance to disk
@@ -295,6 +314,7 @@ class MIPProcessor:
         """
 
         # Remove zero-column variables (vars with no coefficients) to ensure valid bipartite graph
+        # This might error on relaxed instances e.g; MIPLIB_train_supportcase27i.mps.gz
         to_remove = [v for v in mip_model.getVars() if not mip_model.getCol(v).size()]
         mip_model.remove(to_remove)
         mip_model.update()

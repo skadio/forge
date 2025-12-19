@@ -28,6 +28,11 @@ mip_to_mipinfo(forge=forge,
                output_mip_to_mipinfo_pkl="./models/forge_pretrained.pkl",
                relaxation_list=[0.05, 0.01])
 ```
+##### Command Line
+```bash
+cd forge
+python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl 
+```
 
 ## Pre-Train Embeddings
 

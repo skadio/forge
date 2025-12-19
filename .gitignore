@@ -207,19 +207,14 @@ marimo/_lsp/
 __marimo__/
 
 # Ignore generated MIP pickles
-/tests/mip_to_mipinfo.pkl
-/tests/mip_to_gapinfo.pkl
-/tests/forge_pretrained.pkl
-/tests/forge_pretrain.log
+/tests/*.pkl
+/tests/*.log
+
+# Ignore relaxed test instances
 /tests/data/instances/*relaxed*
 
-/models/mip_to_mipinfo.pkl
-/models/mip_to_gapinfo.pkl
-/models/forge_pretrained.pkl
-/models/forge_pretrain.log
-/models/unit_test_mip_to_mipinfo.pkl
-/models/unit_test_forge_pretrained.pkl
-/models/mip_to_embeddings.pkl
+/models/*.pkl
+/models/*.log
 
 # Ignore data
 *data.zip
