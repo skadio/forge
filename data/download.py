@@ -22,7 +22,7 @@ def unzip_file(zip_path: str, unzip_folder: str):
 
 if __name__ == "__main__":
     # url = "https://huggingface.co/datasets/skadio/forge"
-    parser = argparse.ArgumentParser(description="Download a file from a Hugging Face dataset repo")
+    parser = argparse.ArgumentParser(description="Download a file from Hugging Face Forge Dataset")
     parser.add_argument("--repo", default="skadio/forge", help="Hugging Face repo id")
     parser.add_argument("--zip_filename", default="instances.zip", help="Zip file in the repo to download")
     parser.add_argument("--unzip_folder", default="./instances", help="Folder to unzip output")
