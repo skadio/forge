@@ -27,6 +27,7 @@ from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, 
 from multiprocessing import get_context
 from functools import partial
 
+
 class MIPInfo:
     """
     Container for converted MIP instance data stored.
@@ -145,8 +146,8 @@ class MIPProcessor:
                                output_mip_to_mipinfo_pkl: str,
                                relaxation_list: Optional[List[float]] = None,
                                is_save_relaxed: bool = False,
-                               has_return: bool = False, 
-                               num_parallel_workers: int = 2) -> Optional[Dict[str, MIPInfo]]:
+                               has_return: bool = False,
+                               num_parallel_workers: int = 1) -> Optional[Dict[str, MIPInfo]]:
         """
         Converts MIP instances in a given folder to MIPInfo objects and saves them to a pickle file.
 
@@ -167,6 +168,8 @@ class MIPProcessor:
         has_return : bool, default: False
             If True the function returns the dictionary mapping instance names to `MIPInfo`,
             otherwise it returns None after saving to `output_file`.
+        num_parallel_workers: int
+            The number of parallel worker processes to use for conversion.
 
         Returns
         -------
@@ -186,13 +189,13 @@ class MIPProcessor:
         sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, input_mip_instances_file,
                                                            is_sort_by_size=True)
 
+        mip_to_mipinfo = {}
         if num_parallel_workers == 1:
-            print(f"Processing {len(sorted_mip_files)} MIP instances sequentially.")
+            print(f"Convert MIPInfo {len(sorted_mip_files)} instances sequentially.")
             # Start Gurobi environment
             gurobi_env = MIPProcessor._start_gurobi_env()
 
             # Convert each MIP instance to MIPInfo object and store in dictionary
-            mip_to_mipinfo = {}
             for idx in tqdm(range(len(sorted_mip_files))):
 
                 print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
@@ -211,27 +214,26 @@ class MIPProcessor:
                 mip_to_mipinfo[mipinfo.instance_name] = mipinfo
 
                 if relaxation_list:
-                    relaxed_mipinfo = self.get_relaxed_mipinfo(mip_model, sorted_mip_files[idx], relaxation_list, is_save_relaxed)
+                    relaxed_mipinfo = self.get_relaxed_mipinfo(mip_model, sorted_mip_files[idx], relaxation_list,
+                                                               is_save_relaxed)
                     if relaxed_mipinfo:
                         mip_to_mipinfo.update(relaxed_mipinfo)
 
-                print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx], end = '\r')
+                print(">> Finish: Convert to mipinfo:", sorted_mip_files[idx])
 
             # Close Gurobi environment
             gurobi_env.close()
         else:
-            print(f"Processing {len(sorted_mip_files)} MIP instances in parallel with "
+            print(f"Convert MIPInfo {len(sorted_mip_files)} instances in parallel "
                   f"{num_parallel_workers} workers.")
 
             # Parallel path using multiprocessing with the requested number of workers
             ctx = get_context("spawn")
             with ctx.Pool(processes=num_parallel_workers) as pool:
-                worker = partial(
-                    MIPProcessor._run_mip_model_to_mipinfo,
-                    is_save_relaxed=is_save_relaxed,
-                    relaxation_list=relaxation_list,
-                    rng_seed=self.seed,
-                )
+                worker = partial(MIPProcessor._run_mip_model_to_mipinfo,
+                                 is_save_relaxed=is_save_relaxed,
+                                 relaxation_list=relaxation_list,
+                                 rng_seed=self.seed)
 
                 mip_to_mipinfo = {}
                 for result in tqdm(pool.imap_unordered(worker, sorted_mip_files), total=len(sorted_mip_files)):
@@ -239,11 +241,11 @@ class MIPProcessor:
                         continue
                     else:
                         mip_to_mipinfo.update(result)
-                    
+
         save_pickle(mip_to_mipinfo, output_mip_to_mipinfo_pkl)
 
         return mip_to_mipinfo if has_return else None
-    
+
     @staticmethod
     def _run_mip_model_to_mipinfo(mip_file: str,
                                   is_save_relaxed: bool,
@@ -288,13 +290,12 @@ class MIPProcessor:
             mipinfo.instance_name = mip_file
 
             if relaxation_list:
-                relaxed_mipinfo = MIPProcessor._get_relaxed_mipinfo_with_rng(
-                    mip_model=mip_model,
-                    mip_name=mip_file,
-                    relaxation_list=relaxation_list,
-                    is_save_relaxed=is_save_relaxed,
-                    rng=rng,
-                )
+                relaxed_mipinfo = MIPProcessor._get_relaxed_mipinfo_with_rng(mip_model=mip_model,
+                                                                             mip_name=mip_file,
+                                                                             relaxation_list=relaxation_list,
+                                                                             is_save_relaxed=is_save_relaxed,
+                                                                             rng=rng)
+
                 if relaxed_mipinfo:
                     mip_to_mipinfo.update(relaxed_mipinfo)
 
@@ -304,7 +305,7 @@ class MIPProcessor:
         except Exception as e:
             print(f"Warning: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
             return None
-        finally:   
+        finally:
             if gurobi_env is not None:
                 gurobi_env.close()
 
@@ -315,13 +316,11 @@ class MIPProcessor:
                             is_save_relaxed: bool) -> Dict[str, MIPInfo]:
         """Instance wrapper that uses the processor's RNG for relaxations."""
 
-        return MIPProcessor._get_relaxed_mipinfo_with_rng(
-            mip_model=mip_model,
-            mip_name=mip_name,
-            relaxation_list=relaxation_list,
-            is_save_relaxed=is_save_relaxed,
-            rng=self.rng,
-        )
+        return MIPProcessor._get_relaxed_mipinfo_with_rng(mip_model=mip_model,
+                                                          mip_name=mip_name,
+                                                          relaxation_list=relaxation_list,
+                                                          is_save_relaxed=is_save_relaxed,
+                                                          rng=self.rng)
 
     @staticmethod
     def _get_relaxed_mipinfo_with_rng(mip_model,
@@ -385,7 +384,6 @@ class MIPProcessor:
             mip_model_relaxed.dispose()
 
         return mip_to_mipinfo
-
 
     @staticmethod
     def load_mipinfo_from_pickles(mip_to_mipinfo_files: List[str]) -> List[MIPInfo]:

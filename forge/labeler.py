@@ -29,7 +29,7 @@ class MIPLabeler:
                            output_mip_to_gapinfo_pkl,
                            gapinfo_time_limit: int = 120,
                            gurobi_num_threads: int = 1,
-                           num_parallel_workers: int = 5,
+                           num_parallel_workers: int = 1,
                            has_return=False) -> Dict[str, GapInfo]:
 
         # Normalize num_parallel_workers

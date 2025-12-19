@@ -23,7 +23,7 @@ def finetune_integral_gap(forge: Forge,
                           weight_decay: Optional[float] = None,
                           max_graph_nodes: Optional[int] = None,
                           gapinfo_time_limit: int = 120,
-                          num_parallel_workers: int = 5) -> None:
+                          num_parallel_workers: int = 1) -> None:
     """Fine-tune a pre-trained Forge model for integrality gap prediction from a folder of MIP files.
 
     Parameters
@@ -202,76 +202,6 @@ def pretrain(forge: Forge,
                     max_graph_nodes=max_graph_nodes)
 
 
-def mip_to_mipinfo(forge: Forge,
-                   input_mip_folder: Optional[str],
-                   input_mip_instances_file: Optional[str],
-                   output_mip_to_mipinfo_pkl: str,
-                   relaxation_list: Optional[List[float]] = None) -> Dict[str, MIPInfo]:
-    """Pre-train a Forge model.
-
-    You can either:
-        - provide a folder of MIP files via `input_mip_folder` to generate `output_mip_to_mipinfo_pkl`, or
-        - provide an existing MIPInfo pickle via `input_mip_to_mipinfo_pkl` to skip conversion
-         and load the prepared data directly.
-
-    Parameters
-    ----------
-    forge : `Forge`
-        Forge instance to train. Must be a `Forge` object.
-    input_mip_folder : str or None
-        Path to a directory containing MIP files to convert to MIPInfo.
-        Provide `None` if using `input_mip_to_mipinfo_pkl`.
-    input_mip_instances_file : str
-        If provided, only include instances from input_mip_folder listed in the file.
-    output_mip_to_mipinfo_pkl : str
-        Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
-    relaxation_list : List[float]
-        Sequence of relaxation values to apply to MIP instance to generate relaxed instances.
-
-    Raises
-    ------
-    TypeError
-        If `forge` is not a `Forge` instance.
-    ValueError
-        If `input_mip_folder` is not provided or invalid.
-
-    Returns
-    -------
-    Dict[str, MIPInfo]
-        Mapping from MIP identifier (file path or model name) to mip information object.
-        MIPInfo object fields:
-            instance_name : Optional[str]
-                Path or unique identifier of the MIP instance.
-            feature_tensor : Optional[torch.Tensor]
-                Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
-            num_cons : Optional[int]
-                Number of constraints in the original MIP.
-            num_vars : Optional[int]
-                Number of variables in the original MIP.
-            edge_index : Optional[torch.LongTensor]
-                PyG-style edge index tensor of shape (2, num_edges) representing graph connectivity.
-                Row 0 = source indices, row 1 = target indices.
-            edge_weight : Optional[torch.FloatTensor]
-                Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
-    """
-    _validate_forge(forge)
-
-    # MIP processor
-    mip_processor = MIPProcessor(seed=forge.seed)
-
-    check_true(os.path.isdir(input_mip_folder),
-               ValueError("Error: invalid `input_mip_folder` input_mip_folder={input_mip_folder!r}."))
-
-    # Convert MIP files to MIPInfo objects and save to pickle
-    mip_to_mipinfo = mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
-                                                          input_mip_instances_file=input_mip_instances_file,
-                                                          output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
-                                                          relaxation_list=relaxation_list,
-                                                          is_save_relaxed=True,
-                                                          has_return=True)
-    return mip_to_mipinfo
-
-
 def mip_to_embeddings(forge: Forge,
                       input_forge_pkl: str,
                       model_type: str,
@@ -374,6 +304,8 @@ def mip_to_gapinfo(forge: Forge,
         If provided, only include instances from input_mips listed in the file.
     output_mip_to_gapinfo_pkl : str
         Filepath where the resulting mapping from MIP identifiers to gap information will be saved (pickle).
+    num_parallel_workers : int
+        The number of parallel workers to use for processing MIP instances.
     problem_type : str
         The type of problem for which gap information is to be computed.
 
@@ -429,6 +361,80 @@ def mip_to_gapinfo(forge: Forge,
     save_pickle(mip_to_gap_info, output_mip_to_gapinfo_pkl)
 
     return mip_to_gap_info
+
+
+def mip_to_mipinfo(forge: Forge,
+                   input_mip_folder: Optional[str],
+                   input_mip_instances_file: Optional[str],
+                   output_mip_to_mipinfo_pkl: str,
+                   relaxation_list: Optional[List[float]] = None,
+                   num_parallel_workers: int = 1) -> Dict[str, MIPInfo]:
+    """Pre-train a Forge model.
+
+    You can either:
+        - provide a folder of MIP files via `input_mip_folder` to generate `output_mip_to_mipinfo_pkl`, or
+        - provide an existing MIPInfo pickle via `input_mip_to_mipinfo_pkl` to skip conversion
+         and load the prepared data directly.
+
+    Parameters
+    ----------
+    forge : `Forge`
+        Forge instance to train. Must be a `Forge` object.
+    input_mip_folder : str or None
+        Path to a directory containing MIP files to convert to MIPInfo.
+        Provide `None` if using `input_mip_to_mipinfo_pkl`.
+    input_mip_instances_file : str
+        If provided, only include instances from input_mip_folder listed in the file.
+    output_mip_to_mipinfo_pkl : str
+        Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
+    relaxation_list : List[float]
+        Sequence of relaxation values to apply to MIP instance to generate relaxed instances.
+    num_parallel_workers: int
+        The number of parallel worker processes to use for conversion.
+
+    Raises
+    ------
+    TypeError
+        If `forge` is not a `Forge` instance.
+    ValueError
+        If `input_mip_folder` is not provided or invalid.
+
+    Returns
+    -------
+    Dict[str, MIPInfo]
+        Mapping from MIP identifier (file path or model name) to mip information object.
+        MIPInfo object fields:
+            instance_name : Optional[str]
+                Path or unique identifier of the MIP instance.
+            feature_tensor : Optional[torch.Tensor]
+                Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
+            num_cons : Optional[int]
+                Number of constraints in the original MIP.
+            num_vars : Optional[int]
+                Number of variables in the original MIP.
+            edge_index : Optional[torch.LongTensor]
+                PyG-style edge index tensor of shape (2, num_edges) representing graph connectivity.
+                Row 0 = source indices, row 1 = target indices.
+            edge_weight : Optional[torch.FloatTensor]
+                Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
+    """
+    _validate_forge(forge)
+
+    # MIP processor
+    mip_processor = MIPProcessor(seed=forge.seed)
+
+    check_true(os.path.isdir(input_mip_folder),
+               ValueError("Error: invalid `input_mip_folder` input_mip_folder={input_mip_folder!r}."))
+
+    # Convert MIP files to MIPInfo objects and save to pickle
+    mip_to_mipinfo = mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
+                                                          input_mip_instances_file=input_mip_instances_file,
+                                                          output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
+                                                          relaxation_list=relaxation_list,
+                                                          is_save_relaxed=True,
+                                                          has_return=True,
+                                                          num_parallel_workers=num_parallel_workers)
+    return mip_to_mipinfo
 
 
 def _validate_forge(forge, check_trained=False):

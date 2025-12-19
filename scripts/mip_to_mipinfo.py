@@ -16,6 +16,8 @@ if __name__ == "__main__":
                         help='Output path for the mip_to_mipinfo pickle')
     parser.add_argument('--relaxation_list', nargs='*', type=float, default=[0.05, 0.01],
                         help='Space-separated list of relaxation values to use during pretraining')
+    parser.add_argument('--num_parallel_workers', type=int, default=1,
+                        help='The number of parallel workers to use for mipinfo generation')
     args = parser.parse_args()
 
     # Create Forge with training configuration (uses seed for mip solver)
@@ -26,4 +28,5 @@ if __name__ == "__main__":
                                          input_mip_folder=args.input_mip_folder,
                                          input_mip_instances_file=args.input_mip_instances_file,
                                          output_mip_to_mipinfo_pkl=args.output_mip_to_mipinfo_pkl,
-                                         relaxation_list=args.relaxation_list)
+                                         relaxation_list=args.relaxation_list,
+                                         num_parallel_workers=args.num_parallel_workers)

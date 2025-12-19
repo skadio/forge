@@ -36,7 +36,7 @@ if __name__ == "__main__":
                         help='Maximum number of graph nodes when converting MIP instances to bipartite graph')
     parser.add_argument('--gapinfo_time_limit', type=int, default=120,
                         help='Time limit in seconds for computing integral gap info (default: 120)')
-    parser.add_argument('--num_parallel_workers', type=int, default=5,
+    parser.add_argument('--num_parallel_workers', type=int, default=1,
                         help='Number of parallel workers to use for processing MIP instances')
     args = parser.parse_args()
 
