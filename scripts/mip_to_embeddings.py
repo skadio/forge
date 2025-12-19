@@ -9,15 +9,15 @@ if __name__ == "__main__":
 
     # Parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_config_yaml', type=str, default='./forge/configs/train_config.yaml',
+    parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_forge_pkl', type=str, default='./models/forge_pretrained.pkl',
+    parser.add_argument('--input_forge_pkl', type=str, default='../models/forge_pretrained.pkl',
                         help='Path to pre-trained or fine-tuned Forge pickle file')
-    parser.add_argument('--input_mips', type=str, default='./data/train/',
+    parser.add_argument('--input_mips', type=str, default='../data/instances/',
                         help='Path to MIP file, directory, or model')
-    parser.add_argument('--input_mip_instances_file', type=str, default='./data/pretrain.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/pretrain.txt',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='./models/mip_to_embeddings.pkl',
+    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='../models/mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
     parser.add_argument('--model_type', type=str, default=Constants.FORGE_PRE_TRAIN,
                         help=('The type of the pretrained model to load.'

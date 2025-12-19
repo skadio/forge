@@ -35,7 +35,7 @@ class Forge(nn.Module):
                  lambda_edge: Optional[float] = None,
                  lambda_node: Optional[float] = None,
                  orthogonal_reg_weight: Optional[float] = None,
-                 is_eval_mode: Optional[bool] = None) -> None:
+                 is_eval_mode: Optional[bool] = None):
         """Initialize the Forge models.
 
             This module adapts ideas from VQ-Graph style architectures for Mixed Integer Programming (MIP) instances.
@@ -47,13 +47,12 @@ class Forge(nn.Module):
             Parameters
             ----------
             train_config_yaml : Optional[str], default=Constants.default_train_config_yaml
-                Path to a YAML configuration file that provides default training and model
-                hyperparameters. When provided, values from this file are loaded and used
-                unless explicitly overridden via constructor arguments. The path is validated
-                by `_validate_args` and must point to an existing readable file; passing
-                `None` will raise a ValueError. Typical keys expected in the file include
-                `input_dim`, `hidden_dim`, `codebook_dim`, `dropout_ratio`, and other
-                parameters documented below.
+                Path to a YAML configuration file that provides default training and model hyperparameters.
+                When provided, values from this file are loaded and used unless explicitly overridden via constructor arguments.
+                The path is validated by `_validate_args` and must point to an existing readable file;
+                passing `None` will raise a ValueError.
+                Typical keys expected in the file include `input_dim`, `hidden_dim`, `codebook_dim`, `dropout_ratio`, and
+                other parameters documented below.
             input_dim : int, default=10
                 Dimensionality of the raw node features provided in `feats` during `forward`.
                 Also called feat_dim in some contexts.
@@ -134,10 +133,6 @@ class Forge(nn.Module):
                 Activating this adds parameters and changes the forward outputs,
                     appending probability tensors to `h_list`.
                 Required for warm-start and triplet training phases.
-
-            Returns
-            -------
-            None
         """
 
         super().__init__()

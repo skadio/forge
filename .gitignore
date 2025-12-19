@@ -211,6 +211,7 @@ __marimo__/
 /tests/mip_to_gapinfo.pkl
 /tests/forge_pretrained.pkl
 /tests/forge_pretrain.log
+/tests/data/instances/*relaxed*
 
 /models/mip_to_mipinfo.pkl
 /models/mip_to_gapinfo.pkl

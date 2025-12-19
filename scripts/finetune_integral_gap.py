@@ -9,17 +9,17 @@ if __name__ == "__main__":
 
     # Parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
+    parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
                         help='Path to training config YAML file')
-    parser.add_argument('--input_forge_pkl', type=str, default='/models/forge_pretrained.pkl',
+    parser.add_argument('--input_forge_pkl', type=str, default='../models/forge_pretrained.pkl',
                         help='Path to trained Forge pickle file')
-    parser.add_argument('--input_mip_folder', type=str, default='/data/train/',
+    parser.add_argument('--input_mip_folder', type=str, default='../data/instances/',
                         help='Path to MIP folder')
-    parser.add_argument('--input_mip_instances_file', type=str, default='./data/pretrain.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/pretrain.txt',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_forge_finetuned_pkl', type=str, default='/models/forge_integral_gap.pkl',
+    parser.add_argument('--output_forge_finetuned_pkl', type=str, default='../models/forge_integral_gap.pkl',
                         help='Path to trained Forge pickle file')
-    parser.add_argument('--output_mip_to_gapinfo_pkl', type=str,  default='/models/mip_to_gapinfo.pkl',
+    parser.add_argument('--output_mip_to_gapinfo_pkl', type=str,  default='../models/mip_to_gapinfo.pkl',
                         help='Output pickle file to store mip_to_integral_gap')
     parser.add_argument('--input_mip_to_gapinfo_pkl', type=str, default=None,
                         help='Optional path to an existing input_mip_to_gapinfo_pkl to load instead of creating')

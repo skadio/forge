@@ -4,7 +4,7 @@ from typing import Union, List, Sequence, Dict, Any, Optional
 import gurobipy as gp
 
 from forge.embeddings import Forge
-from forge.processor import MIPProcessor, MIPEmbeddings
+from forge.processor import MIPProcessor, MIPEmbeddings, MIPInfo
 from forge.utils import check_true, save_pickle, load_pickle
 from forge.labeler import MIPLabeler, GapInfo
 
@@ -23,7 +23,7 @@ def finetune_integral_gap(forge: Forge,
                           weight_decay: Optional[float] = None,
                           max_graph_nodes: Optional[int] = None,
                           gapinfo_time_limit: int = 120,
-                          num_parallel_workers: Optional[int] = 5) -> None:
+                          num_parallel_workers: int = 5) -> None:
     """Fine-tune a pre-trained Forge model for integrality gap prediction from a folder of MIP files.
 
     Parameters
@@ -55,7 +55,7 @@ def finetune_integral_gap(forge: Forge,
         Maximum number of graph nodes allowed.
     gapinfo_time_limit : int, default=120
         Time limit (in seconds) for computing gap information for each MIP instance.
-    num_parallel_workers : Optional[int], default=5
+    num_parallel_workers : int, default=5
         Number of parallel workers to use for processing MIP instances.
 
     Returns
@@ -102,6 +102,7 @@ def finetune_integral_gap(forge: Forge,
                                  learning_rate=learning_rate,
                                  weight_decay=weight_decay,
                                  max_graph_nodes=max_graph_nodes)
+
 
 def pretrain(forge: Forge,
              input_mip_folder: Optional[str],
@@ -199,6 +200,76 @@ def pretrain(forge: Forge,
                     learning_rate=learning_rate,
                     weight_decay=weight_decay,
                     max_graph_nodes=max_graph_nodes)
+
+
+def mip_to_mipinfo(forge: Forge,
+                   input_mip_folder: Optional[str],
+                   input_mip_instances_file: Optional[str],
+                   output_mip_to_mipinfo_pkl: str,
+                   relaxation_list: Optional[List[float]] = None) -> Dict[str, MIPInfo]:
+    """Pre-train a Forge model.
+
+    You can either:
+        - provide a folder of MIP files via `input_mip_folder` to generate `output_mip_to_mipinfo_pkl`, or
+        - provide an existing MIPInfo pickle via `input_mip_to_mipinfo_pkl` to skip conversion
+         and load the prepared data directly.
+
+    Parameters
+    ----------
+    forge : `Forge`
+        Forge instance to train. Must be a `Forge` object.
+    input_mip_folder : str or None
+        Path to a directory containing MIP files to convert to MIPInfo.
+        Provide `None` if using `input_mip_to_mipinfo_pkl`.
+    input_mip_instances_file : str
+        If provided, only include instances from input_mip_folder listed in the file.
+    output_mip_to_mipinfo_pkl : str
+        Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
+    relaxation_list : List[float]
+        Sequence of relaxation values to apply to MIP instance to generate relaxed instances.
+
+    Raises
+    ------
+    TypeError
+        If `forge` is not a `Forge` instance.
+    ValueError
+        If `input_mip_folder` is not provided or invalid.
+
+    Returns
+    -------
+    Dict[str, MIPInfo]
+        Mapping from MIP identifier (file path or model name) to mip information object.
+        MIPInfo object fields:
+            instance_name : Optional[str]
+                Path or unique identifier of the MIP instance.
+            feature_tensor : Optional[torch.Tensor]
+                Node feature matrix of shape `(num_cons + num_vars, feat_dim)` with constraints stacked first.
+            num_cons : Optional[int]
+                Number of constraints in the original MIP.
+            num_vars : Optional[int]
+                Number of variables in the original MIP.
+            edge_index : Optional[torch.LongTensor]
+                PyG-style edge index tensor of shape (2, num_edges) representing graph connectivity.
+                Row 0 = source indices, row 1 = target indices.
+            edge_weight : Optional[torch.FloatTensor]
+                Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
+    """
+    _validate_forge(forge)
+
+    # MIP processor
+    mip_processor = MIPProcessor(seed=forge.seed)
+
+    check_true(os.path.isdir(input_mip_folder),
+               ValueError("Error: invalid `input_mip_folder` input_mip_folder={input_mip_folder!r}."))
+
+    # Convert MIP files to MIPInfo objects and save to pickle
+    mip_to_mipinfo = mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
+                                                          input_mip_instances_file=input_mip_instances_file,
+                                                          output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
+                                                          relaxation_list=relaxation_list,
+                                                          is_save_relaxed=True,
+                                                          has_return=True)
+    return mip_to_mipinfo
 
 
 def mip_to_embeddings(forge: Forge,

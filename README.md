@@ -1,7 +1,35 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
 Forge is a research library designed for representational learning in combinatorial problems. 
 
-## Quick Start: Pre-Train Embeddings
+## Generate MIP Info
+
+```python
+from forge.embeddings import Forge
+from forge.pipeline import mip_to_mipinfo
+from forge.utils import Constants
+
+# Forge model with its pre-trained configuration
+forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
+# Generate MIP info object for a set of given mip instances 
+# The output mip_to_mipinfo pickle is stored as output_mip_to_mipinfo_pkl
+# The mip_to_mipinfo pkl can be re-used in pretrain() with input_mip_to_mipinfo_pkl flag
+#   - mip_to_mipinfo maps mip instance to a mipinfo object, Dict[str, MIPInfo], containing:
+#       - instance_name: str, the name of the MIP instance
+#       - feature_tensor: torch.Tensor, the feature tensor for the MIP instance (num_cons + num_vars, feat_dim=10)
+#       - num_cons: int, the number of constraints in the MIP instance
+#       - num_vars: int, the number of variables in the MIP instance
+#       - edge_index: torch.Tensor, (2, E) edges from source (constraint) to target (variable) nodes 
+#       - edge_weight: torch.Tensor, (E,), weights of the edges
+# Pretraining log is stored in output_log_file with loss curves and training details
+mip_to_mipinfo(forge=forge,
+               input_mip_folder="./data/instances/",
+               input_mip_instances_file="./data/configs/test_pretrain.txt",
+               output_mip_to_mipinfo_pkl="./models/forge_pretrained.pkl",
+               relaxation_list=[0.05, 0.01])
+```
+
+## Pre-Train Embeddings
 
 ```python
 from forge.embeddings import Forge
@@ -13,7 +41,7 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 # Pretrain Forge on a set of MIP instances in the given input folder
 # The pretrained model pickle is stored as output_forge_pretrained_pkl
 # The intermediate mip_to_mipinfo pickle is stored as output_mip_to_mipinfo_pkl
-#   - This mip_to_mipinfo pkl can be reused with input_mip_to_mipinfo_pkl flag to skip MIP parsing in future pre-training
+# The mip_to_mipinfo pkl can be reused with input_mip_to_mipinfo_pkl flag to skip MIP parsing in future pre-training
 #   - mip_to_mipinfo maps mip instance to a mipinfo object, Dict[str, MIPInfo], containing:
 #       - instance_name: str, the name of the MIP instance
 #       - feature_tensor: torch.Tensor, the feature tensor for the MIP instance (num_cons + num_vars, feat_dim=10)
@@ -36,7 +64,7 @@ cd forge
 python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
 ```
 
-## Quick Start: Generate Embeddings
+## Generate Embeddings
 
 ```python
 from forge.embeddings import Forge
@@ -66,7 +94,7 @@ cd forge
 python -m scripts.mip_to_embeddings --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_pretrain.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
 ```
 
-## Quick Start: Fine-Tune Integral Gap
+## Fine-Tune Integral Gap
 
 ```python
 from forge.embeddings import Forge
@@ -93,7 +121,7 @@ cd forge
 python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/fine_tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
 ```
 
-## Quick Start: Predict Integral Gap
+## Predict Integral Gap
 
 ```python
 from forge.embeddings import Forge
