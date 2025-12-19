@@ -28,7 +28,8 @@ app = modal.App("Forge", image=forge_image)
 
 
 @app.function(volumes={"/root/data/instances": instances_volume,
-                       "/root/models/": models_volume})
+                       "/root/models/": models_volume},
+              gpu="A100-80GB:4")
 def run():
     import os, subprocess
 
@@ -41,6 +42,14 @@ def run():
     from forge.pipeline import pretrain
 
     forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
+    pretrain(forge=forge,
+             input_mip_folder="/root/data/instances/",
+             input_mip_instances_file="/root/data/configs/iclr26_pretrain.txt",
+             output_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
+             input_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
+             output_forge_pretrained_pkl="/root/models/iclr26_pretrained.pkl",
+             output_log_file="./models/forge_pretrained.log")
 
 
 # > modal run main.py

@@ -32,7 +32,7 @@ class Constants(NamedTuple):
     _MODELS_DIR_NAME = "models"
     _TESTS_DIR_NAME = "tests"
     _TRAIN_CONFIG_NAME = "train_config.yaml"
-    _MIPINFO_NAME = "mip_to_mipinfo.pkl"
+    _MIPINFO_NAME = "iclr26_pretrain_mip_to_mipinfo.pkl"
     _EMBEDDINGS_NAME = "mip_to_embeddings.pkl"
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"

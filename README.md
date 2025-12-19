@@ -31,7 +31,7 @@ mip_to_mipinfo(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl 
+python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr26_pretrain_mip_to_mipinfo.pkl 
 ```
 
 ## Pre-Train Embeddings
@@ -58,7 +58,7 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 pretrain(forge=forge,
          input_mip_folder="./data/instances/",
          input_mip_instances_file="./data/configs/pretrain.txt",
-         output_mip_to_mipinfo_pkl="./models/mip_to_mipinfo.pkl",
+         output_mip_to_mipinfo_pkl="./models/iclr26_pretrain_mip_to_mipinfo.pkl",
          output_forge_pretrained_pkl="./models/forge_pretrained.pkl",
          output_log_file="./models/forge_pretrained.log")
 ```
@@ -66,7 +66,7 @@ pretrain(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
+python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr26_pretrain_mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
 ```
 
 ## Generate Embeddings
