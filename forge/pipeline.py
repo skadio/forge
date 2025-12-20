@@ -119,10 +119,11 @@ def pretrain(forge: Forge,
              max_graph_nodes: Optional[int] = None) -> None:
     """Pre-train a Forge model.
 
-    You can either:
-        - provide a folder of MIP files via `input_mip_folder` to generate `output_mip_to_mipinfo_pkl`, or
-        - provide an existing MIPInfo pickle via `input_mip_to_mipinfo_pkl` to skip conversion
-         and load the prepared data directly.
+    You can provide either:
+        1) a folder of MIP files via `input_mip_folder` and `input_mip_instances_file` to consider
+        2) Existing MIPInfo pickle via `input_mip_to_mipinfo_pkl` to skip conversion and
+        load the prepared data directly.
+        If input_mip_to_mipinfo_pkl is given, skips input_mip_folder and input_mip_instances_file.
 
     Parameters
     ----------
@@ -141,6 +142,7 @@ def pretrain(forge: Forge,
         Filepath for storing pre_training logs.
     input_mip_to_mipinfo_pkl : str or None
         Optional path to an existing mip_to_mipinfo pickle to load instead of generating it.
+        If given, skips input_mip_folder and input_mip_instances_file.
     relaxation_list : List[float]
         Sequence of relaxation values to apply to MIP instance to generate relaxed instances.
     epochs : Optional[int], optional

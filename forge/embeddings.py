@@ -374,7 +374,6 @@ class Forge(nn.Module):
                                            lambda_edge=self.lambda_edge,
                                            batch_size=self.adj_block_size)
 
-
         h_list.append(quantized)
         h_list.append(quantized_node)
         h_list.append(quantized_edge_1)
@@ -503,8 +502,8 @@ class Forge(nn.Module):
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
                     h_list, logits, loss, indices, codebook_ = self.forward(features,
-                                                                              mipinfo.num_cons, mipinfo.num_vars,
-                                                                              edge_index, edge_weight)
+                                                                            mipinfo.num_cons, mipinfo.num_vars,
+                                                                            edge_index, edge_weight)
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -588,9 +587,9 @@ class Forge(nn.Module):
 
         # Forward pass through trained Forge
         h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
-                                                                  mipinfo.num_cons, mipinfo.num_vars,
-                                                                  mipinfo.edge_index.to(self.device),
-                                                                  mipinfo.edge_weight.to(self.device))
+                                                                mipinfo.num_cons, mipinfo.num_vars,
+                                                                mipinfo.edge_index.to(self.device),
+                                                                mipinfo.edge_weight.to(self.device))
         # Restore original mode
         self.is_eval_mode = original_mode
 
@@ -712,7 +711,7 @@ class Forge(nn.Module):
 
                     # Compute loss and prediction
                     h_list, logits, loss, indices, codebook_ = self.forward(feature_tensor, mipinfo.num_cons,
-                                                                              mipinfo.num_vars, edge_index, edge_weight)
+                                                                            mipinfo.num_vars, edge_index, edge_weight)
                     # Predict gap ratio
                     # h_list[-1] is the integral gap head output
                     gap_ratio_pred = torch.mean(h_list[-1][mipinfo.num_cons:, :])
@@ -804,9 +803,9 @@ class Forge(nn.Module):
 
         # Forward pass through trained Forge
         h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
-                                                                  mipinfo.num_cons, mipinfo.num_vars,
-                                                                  mipinfo.edge_index.to(self.device),
-                                                                  mipinfo.edge_weight.to(self.device))
+                                                                mipinfo.num_cons, mipinfo.num_vars,
+                                                                mipinfo.edge_index.to(self.device),
+                                                                mipinfo.edge_weight.to(self.device))
         # Restore original mode
         self.is_eval_mode = original_mode
 

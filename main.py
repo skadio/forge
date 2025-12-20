@@ -16,27 +16,27 @@ forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
     "pip install gurobipy numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-).add_local_dir(".", "/root/", ignore=["./main.py", # This will be copied when running modal on main.py
-                                       "./data/instances/", "./models", # these will come from Volumes
-                                       "./experiments", "./tests", # not needed
-                                       "./CHANGELOG.txt", "./LICENSE", ".MANIFEST.in", "./README.md" 
-                                       "./.git", "./.idea", "./__pycache__", "./data/__pycache__"
-                                       "./forge/__pycache__", "./experiments/__pycache__"])
+).add_local_dir(".", "/root/", ignore=["./main.py",  # This will be copied when running modal on main.py
+                                       "./data/instances/", "./models",  # these will come from Volumes
+                                       "./experiments", "./tests",  # not needed
+                                       "./.gitignore", "./CHANGELOG.txt", "./LICENSE", "./MANIFEST.in",
+                                       "./pyproject.toml", "./README.md", "./.git", "./.idea", "./__pycache__",
+                                       "./data/__pycache__" "./forge/__pycache__", "./experiments/__pycache__"])
 
 # Create Modal app
-app = modal.App("Forge", image=forge_image)
+app = modal.App("Forge-ICLR-Pretrain", image=forge_image)
 
 
 @app.function(volumes={"/root/data/instances": instances_volume,
-                       "/root/models/": models_volume})
-              # gpu="A100-40GB")
+                       "/root/models/": models_volume},
+              timeout=36000,
+              gpu="A100-40GB")
 def run():
     import os, subprocess
-
     current_dir = os.getcwd()
     # parent_dir = os.path.dirname(current_dir)
     print("Current directory:", current_dir)
-    subprocess.run(["ls", "-l", current_dir])
+    subprocess.run(["ls", "-al", current_dir])
 
     from forge.embeddings import Forge
     from forge.pipeline import pretrain
@@ -49,23 +49,14 @@ def run():
              output_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
              input_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
              output_forge_pretrained_pkl="/root/models/iclr26_pretrained.pkl",
-             output_log_file="./models/forge_pretrained.log")
+             output_log_file="/root/models/forge_pretrained.log")
 
 
 # > modal run main.py
 @app.local_entrypoint()
 def main():
-    # run locally
     # print(run.local())
-
-    # # run remotely on Modal
     run.remote()
-
-    # # run remotely on Modal in parallel
-    # total = 0
-    # for ret in f.map(range(10)):
-    #     total += ret
-    # print(total)
 
 # Define CUDA base image tag
 # cuda_version = "12.4.1"
