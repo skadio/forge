@@ -12,7 +12,7 @@ from vector_quantize_pytorch import VectorQuantize
 
 from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
 from forge.labeler import GapInfo
-from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor
+from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor, _MIPUtils
 from forge.utils import check_true, Constants, overwrite_if_given, copy_params
 
 
@@ -679,7 +679,7 @@ class Forge(nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
         # Start Gurobi environment
-        gurobi_env = MIPProcessor._start_gurobi_env()
+        gurobi_env = _MIPUtils.start_gurobi_env()
 
         # Mip instances
         mips = list(input_mip_to_gapinfo.keys())

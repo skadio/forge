@@ -3,9 +3,8 @@ from multiprocessing import get_context
 from functools import partial
 from tqdm import tqdm
 import gurobipy as gp
-import os
 
-from forge.processor import MIPProcessor
+from forge.processor import MIPProcessor, _MIPUtils
 from forge.utils import save_pickle
 
 
@@ -24,46 +23,45 @@ class MIPLabeler:
         pass
 
     @staticmethod
-    def get_mip_to_gapinfo(input_mip_folder,
-                           input_mip_instances_file: Optional[str],
-                           output_mip_to_gapinfo_pkl,
-                           gapinfo_time_limit: int = 120,
-                           gurobi_num_threads: int = 1,
-                           num_parallel_workers: int = 1,
-                           has_return=False) -> Dict[str, GapInfo]:
+    def convert_mip_to_gapinfo(input_mip_folder,
+                               input_mip_instances_file: Optional[str],
+                               output_mip_to_gapinfo_pkl,
+                               gapinfo_time_limit: int = 120,
+                               gurobi_num_threads: int = 1,
+                               num_parallel_workers: int = 1,
+                               has_return=False) -> Dict[str, GapInfo]:
 
         # Normalize num_parallel_workers
         if num_parallel_workers is None or num_parallel_workers < 1:
             num_parallel_workers = 1
 
-        mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, input_mip_instances_file, is_sort_by_size=False)
+        mip_files = _MIPUtils.get_only_mip_files(input_mip_folder, input_mip_instances_file, is_sort_by_size=False)
 
         mip_to_gapinfo: Dict[str, GapInfo] = {}
 
-        # Sequential path (original behavior) when using a single worker
+        # Sequential path when using a single worker
         if num_parallel_workers == 1:
             # Start Gurobi environment and set limits
-            gurobi_env = MIPProcessor._start_gurobi_env()
+            gurobi_env = _MIPUtils.start_gurobi_env()
             gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
             gurobi_env.setParam("Threads", gurobi_num_threads)
 
             for mip_file in tqdm(mip_files):
-                mip_to_gapinfo[mip_file] = MIPLabeler._get_gapinfo_from_mip_file(mip_file, gurobi_env)
+                mip_to_gapinfo[mip_file] = MIPLabeler._mip_file_to_gapinfo(mip_file, gurobi_env)
 
             gurobi_env.close()
         else:
             # Parallel path using multiprocessing with the requested number of workers
             ctx = get_context("spawn")
             with ctx.Pool(processes=num_parallel_workers) as pool:
-                worker = partial(MIPLabeler._run_get_gapinfo,
+                worker = partial(MIPLabeler._run_gapinfo_worker,
                                  gapinfo_time_limit=gapinfo_time_limit,
                                  gurobi_num_threads=gurobi_num_threads)
 
                 for result in tqdm(pool.imap_unordered(worker, mip_files), total=len(mip_files)):
-                    if result is None:
-                        continue
-                    mip_file, gapinfo = result
-                    mip_to_gapinfo[mip_file] = gapinfo
+                    if result:
+                        mip_file, gapinfo = result
+                        mip_to_gapinfo[mip_file] = gapinfo
 
         save_pickle(mip_to_gapinfo, output_mip_to_gapinfo_pkl)
 
@@ -71,7 +69,7 @@ class MIPLabeler:
 
 
     @staticmethod
-    def _get_gapinfo_from_mip_file(mip_file: str, gurobi_env) -> Optional[GapInfo]:
+    def _mip_file_to_gapinfo(mip_file: str, gurobi_env) -> Optional[GapInfo]:
         """
             On success, returns GapInfo object.
             On fail, returns None.
@@ -119,9 +117,9 @@ class MIPLabeler:
         return GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=mip_sol, gap_ratio=ratio)
 
     @staticmethod
-    def _run_get_gapinfo(mip_file: str,
-                         gapinfo_time_limit: int,
-                         gurobi_num_threads: int) -> Optional[Tuple[str, GapInfo]]:
+    def _run_gapinfo_worker(mip_file: str,
+                            gapinfo_time_limit: int,
+                            gurobi_num_threads: int) -> Optional[Tuple[str, GapInfo]]:
 
         """Worker function to compute GapInfo for a single MIP instance.
 
@@ -134,12 +132,12 @@ class MIPLabeler:
 
         try:
             # Start Gurobi environment and set limits for this worker
-            gurobi_env = MIPProcessor._start_gurobi_env()
+            gurobi_env = _MIPUtils.start_gurobi_env()
             gurobi_env.setParam("TimeLimit", gapinfo_time_limit)
             gurobi_env.setParam("Threads", gurobi_num_threads)
 
-            # Create model and get gapinfo
-            gapinfo = MIPLabeler._get_gapinfo_from_mip_file(mip_file, gurobi_env)
+            # Create gapinfo
+            gapinfo = MIPLabeler._mip_file_to_gapinfo(mip_file, gurobi_env)
 
             gurobi_env.close()
 

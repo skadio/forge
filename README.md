@@ -26,12 +26,13 @@ mip_to_mipinfo(forge=forge,
                input_mip_folder="./data/instances/",
                input_mip_instances_file="./data/configs/test_pretrain.txt",
                output_mip_to_mipinfo_pkl="./models/forge_pretrained.pkl",
-               relaxation_list=[0.05, 0.01])
+               relaxation_list=[0.05, 0.01],
+               num_parallel_workers=1)
 ```
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr26_pretrain_mip_to_mipinfo.pkl 
+python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl --relaxation_list 0.05 0.01 --num_parallel_workers 1
 ```
 
 ## Pre-Train Embeddings

@@ -1,12 +1,12 @@
 import os
-from typing import Union, List, Sequence, Dict, Any, Optional
+from typing import Union, List, Sequence, Dict, Optional
 
 import gurobipy as gp
 
 from forge.embeddings import Forge
-from forge.processor import MIPProcessor, MIPEmbeddings, MIPInfo
-from forge.utils import check_true, save_pickle, load_pickle
 from forge.labeler import MIPLabeler, GapInfo
+from forge.processor import MIPProcessor, _MIPUtils, MIPEmbeddings, MIPInfo
+from forge.utils import check_true, save_pickle, load_pickle
 
 
 def finetune_integral_gap(forge: Forge,
@@ -86,13 +86,13 @@ def finetune_integral_gap(forge: Forge,
 
         # Get MIP to integral gap ratio labels for fine-tuning
         labeler = MIPLabeler()
-        mip_to_gapinfo = labeler.get_mip_to_gapinfo(input_mip_folder=input_mip_folder,
-                                                    input_mip_instances_file=input_mip_instances_file,
-                                                    output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
-                                                    gapinfo_time_limit=gapinfo_time_limit,
-                                                    gurobi_num_threads=1,
-                                                    num_parallel_workers=num_parallel_workers,
-                                                    has_return=True)
+        mip_to_gapinfo = labeler.convert_mip_to_gapinfo(input_mip_folder=input_mip_folder,
+                                                        input_mip_instances_file=input_mip_instances_file,
+                                                        output_mip_to_gapinfo_pkl=output_mip_to_gapinfo_pkl,
+                                                        gapinfo_time_limit=gapinfo_time_limit,
+                                                        gurobi_num_threads=1,
+                                                        num_parallel_workers=num_parallel_workers,
+                                                        has_return=True)
 
     # Fine-tune the Forge model
     forge._finetune_integral_gap(input_mip_to_gapinfo=mip_to_gapinfo,
@@ -184,12 +184,11 @@ def pretrain(forge: Forge,
         mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
                                              input_mip_instances_file=input_mip_instances_file,
                                              output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
-                                             relaxation_list=relaxation_list,
-                                             has_return=False)
+                                             relaxation_list=relaxation_list, has_return=False)
         pkl_to_load = output_mip_to_mipinfo_pkl
 
     # Load MIPInfo objects for training
-    mipinfo_list = mip_processor.load_mipinfo_from_pickles([pkl_to_load])
+    mipinfo_list = _MIPUtils.load_mipinfo_from_pickles([pkl_to_load])
 
     # Pre-train the Forge model
     forge._pretrain(input_mipinfo_list=mipinfo_list,
@@ -248,7 +247,7 @@ def mip_to_embeddings(forge: Forge,
     mip_items = MIPProcessor.get_mip_items(input_mips, input_mip_instances_file)
 
     # Start Gurobi environment
-    gurobi_env = MIPProcessor._start_gurobi_env()
+    gurobi_env = _MIPUtils.start_gurobi_env()
 
     # For each MIP item, create MIP model, and generate embedding
     mip_to_embeddings = {}
@@ -332,7 +331,7 @@ def mip_to_gapinfo(forge: Forge,
     mip_items = MIPProcessor.get_mip_items(input_mips, input_mip_instances_file)
 
     # Start Gurobi environment
-    gurobi_env = MIPProcessor._start_gurobi_env()
+    gurobi_env = _MIPUtils.start_gurobi_env()
 
     # For each MIP item, create MIP model, and generate embedding
     mip_to_gap_info = {}
@@ -430,10 +429,8 @@ def mip_to_mipinfo(forge: Forge,
     mip_to_mipinfo = mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
                                                           input_mip_instances_file=input_mip_instances_file,
                                                           output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
-                                                          relaxation_list=relaxation_list,
-                                                          is_save_relaxed=True,
-                                                          has_return=True,
-                                                          num_parallel_workers=num_parallel_workers)
+                                                          relaxation_list=relaxation_list, is_save_relaxed=True,
+                                                          num_parallel_workers=num_parallel_workers, has_return=True)
     return mip_to_mipinfo
 
 
