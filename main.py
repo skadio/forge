@@ -28,8 +28,8 @@ app = modal.App("Forge", image=forge_image)
 
 
 @app.function(volumes={"/root/data/instances": instances_volume,
-                       "/root/models/": models_volume},
-              gpu="A100-40GB")
+                       "/root/models/": models_volume})
+              # gpu="A100-40GB")
 def run():
     import os, subprocess
 

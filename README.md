@@ -1,5 +1,5 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
-Forge is a research library designed for representational learning in combinatorial problems. 
+Forge is a research library designed for representational learning in combinatorial problems.
 
 ## Generate MIP Info
 
