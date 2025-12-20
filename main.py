@@ -3,8 +3,8 @@ import modal
 # Manually create a mount of all instances from command line
 # Create: modal volume create instances
 # List: modal volume list
+# LS: modal volume ls instances
 # Upload: modal volume put instances . (inside forge/data/instances)
-# LS: modal volume ls data
 # modal volume rename data instances
 #  modal volume rm instances configs -r
 instances_volume = modal.Volume.from_name("instances")
@@ -29,7 +29,7 @@ app = modal.App("Forge", image=forge_image)
 
 @app.function(volumes={"/root/data/instances": instances_volume,
                        "/root/models/": models_volume},
-              gpu="A100-80GB:4")
+              gpu="A100-40GB")
 def run():
     import os, subprocess
 
