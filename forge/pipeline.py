@@ -244,7 +244,7 @@ def mip_to_embeddings(forge: Forge,
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
-    mip_items = MIPProcessor.get_mip_items(input_mips, input_mip_instances_file)
+    mip_items = _MIPUtils.get_mip_items(input_mips, input_mip_instances_file)
 
     # Start Gurobi environment
     gurobi_env = _MIPUtils.start_gurobi_env()
