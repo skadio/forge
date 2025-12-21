@@ -462,13 +462,15 @@ class Forge(nn.Module):
         weight_decay = overwrite_if_given(self.weight_decay, weight_decay)
         max_graph_nodes = overwrite_if_given(self.max_graph_nodes, max_graph_nodes)
 
-        main_loss_list = []
         skip_list = set()
         optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-        # Loop through data set
         t = ""
+        main_loss_list = []
         for epoch in range(epochs):
+            print("<<< Epoch:", epoch)
+            epoch_loss_list = []
+            epoch_start = time.time()
 
             # Alternate between prioritizing node feature reconstruction and edge reconstruction
             if epoch % 2 == 0:
@@ -478,12 +480,8 @@ class Forge(nn.Module):
                 self.lambda_node = 1
                 self.lambda_edge = 10
 
-            loss_list = []
-            epoch_start = time.time()
-
             # MIP instances in dataset
             loss = None
-            print()
             for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
@@ -491,7 +489,8 @@ class Forge(nn.Module):
                 # Some MIP instances are too large to fit in GPU memory
                 num_nodes = mipinfo.num_cons + mipinfo.num_vars
                 if num_nodes > max_graph_nodes:
-                    skip_list.add(idx)
+                    print("Skipping:", mipinfo.instance_name, " size:", num_nodes)
+                    skip_list.add(mipinfo.instance_name)
                     continue
 
                 # Push to device before the for-loop below
@@ -499,38 +498,42 @@ class Forge(nn.Module):
                 edge_index = mipinfo.edge_index.to(self.device)
                 edge_weight = mipinfo.edge_weight.to(self.device)
 
+                # Train on this instance for specified steps
+                instance_loss_list = []
                 for step in range(steps_per_instance):
                     # Compute loss and prediction
                     h_list, logits, loss, indices, codebook_ = self.forward(features,
                                                                             mipinfo.num_cons, mipinfo.num_vars,
                                                                             edge_index, edge_weight)
-
+                    instance_loss_list.append(loss.item())
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
-                loss_list.append(loss.item())
-                print("\rEpoch: ", epoch,
-                      "| Loss on Instance", idx, ": ", np.round(loss.item(), 3),
-                      "| Mean Loss :", np.round(np.mean(loss_list), 3), end='')
+                # End of instance steps, add average instance loss to epoch loss
+                avg_instance_loss = float(np.mean(instance_loss_list)) if len(instance_loss_list) > 0 else 0.0
+                epoch_loss_list.append(avg_instance_loss)
+
+                print("Epoch,", epoch,
+                      ", Idx,", idx,
+                      ", Avg. Instance Loss,", np.round(avg_instance_loss, 3),
+                      ", Avg. Epoch Loss,", np.round(np.mean(epoch_loss_list), 3),
+                      ", ", mipinfo.instance_name)
+
                 torch.cuda.empty_cache()
 
-            print("\r")
-            print()
-            print("------")
+            # End of epoch, add average epoch loss to main loss list
+            main_loss_list.append(np.round(np.mean(epoch_loss_list), 3))
 
-            p_string = ("Epoch: " + str(epoch) + " " +
-                        "| Mean Loss: " + str(np.round(np.mean(loss_list), 3)) +
-                        "+/-" + str(np.round(np.std(loss_list), 3)) +
-                        " | Time For Epoch : " + str(np.round(time.time() - epoch_start, 3)) + "s")
-
-            t += p_string + "\n"
-            print(p_string, end='\n')
-            print("------")
-            print()
+            epoch_summary = (">>> DONE! Epoch, " + str(epoch) +
+                             " , Avg. Epoch Loss, " + str(np.round(np.mean(epoch_loss_list), 3)) +
+                             " , +/-," + str(np.round(np.std(epoch_loss_list), 3)) +
+                             " , Epoch Time, " + np.round(time.time() - epoch_start, 3) +
+                             " , Avg. Main Loss, " + str(np.round(np.mean(main_loss_list), 3)))
+            print(epoch_summary)
+            t += epoch_summary + "\n"
 
             torch.save(self.state_dict(), output_forge_pkl)
-            main_loss_list.append(np.round(np.mean(loss_list), 3))
 
             if output_log_file is not None:
                 with open(output_log_file, 'a') as file:

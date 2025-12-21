@@ -27,10 +27,19 @@ forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
 app = modal.App("Forge-ICLR-Pretrain", image=forge_image)
 
 
+# Nvidia B200 # $6.25 / h
+# Nvidia H200 # $4.54 / h
+# Nvidia H100 # $3.95 / h
+# Nvidia A100, 80 GB # $2.50 / h
+# Nvidia A100, 40 GB # $2.10 / h
+# Nvidia L40S # $1.95 / h
+# Nvidia A10 # $1.10 / h
+# Nvidia L4 # $0.80 / h
+# Nvidia T4 # $0.59 / h
 @app.function(volumes={"/root/data/instances": instances_volume,
                        "/root/models/": models_volume},
-              timeout=36000,
-              gpu="A100-40GB")
+              timeout=86000,
+              gpu="H200")
 def run():
     import os, subprocess
     current_dir = os.getcwd()
@@ -43,14 +52,14 @@ def run():
 
     forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 
+    config="iclr26_pretrain"
     pretrain(forge=forge,
              input_mip_folder="/root/data/instances/",
-             input_mip_instances_file="/root/data/configs/iclr26_pretrain.txt",
-             output_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
-             input_mip_to_mipinfo_pkl="/root/models/iclr26_pretrain_mip_to_mipinfo.pkl",
-             output_forge_pretrained_pkl="/root/models/iclr26_pretrained.pkl",
-             output_log_file="/root/models/forge_pretrained.log")
-
+             input_mip_instances_file=f"/root/data/configs/{config}.txt",
+             output_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
+             input_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
+             output_forge_pretrained_pkl=f"/root/models/{config}_pretrained.pkl",
+             output_log_file=f"/root/models/{config}_pretrained.log")
 
 # > modal run main.py
 @app.local_entrypoint()
