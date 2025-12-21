@@ -1,3 +1,4 @@
+import gc
 import time
 from typing import List, Callable, Optional, Tuple, Union, Dict
 
@@ -22,7 +23,6 @@ class Forge(nn.Module):
     This class constructs a GraphSAGE-based encoder, optional prediction heads, and a vector quantization module.
 
     """
-
     def __init__(self,
                  train_config_yaml: Optional[str] = Constants.default_train_config_yaml,
                  input_dim: Optional[int] = None,
@@ -232,7 +232,8 @@ class Forge(nn.Module):
 
     def forward(self, feature_tensor: torch.Tensor,
                 num_cons: int, num_vars: int,
-                edge_index: torch.Tensor, edge_weight: Optional[torch.Tensor]) \
+                edge_index: torch.Tensor, edge_weight: Optional[torch.Tensor],
+                adj_gpu: Optional[torch.Tensor] = None) \
             -> Tuple[List[torch.Tensor], torch.Tensor, Union[torch.Tensor, int], torch.Tensor, Union[
                 torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
         """Forward pass of the Forge models.
@@ -263,6 +264,12 @@ class Forge(nn.Module):
             In this codebase `edge_weight` is used for adjacency reconstruction / loss, not in `SAGEConv`.
             PyG `SAGEConv` does not consume `edge_weight`; Use a weighted convolution layer if message passing
             should be coefficient-aware.
+        dj_gpu : Optional[torch.Tensor], default=None
+            Pre-computed adjacency matrix on GPU of shape (num_nodes, num_nodes).
+            When provided and not in eval mode, this matrix is used directly for edge reconstruction loss,
+            avoiding repeated CPU construction.
+            If None and not in eval mode, the adjacency matrix will be built on CPU (slower).
+
         Returns
         -------
         h_list : List[torch.Tensor]
@@ -352,16 +359,20 @@ class Forge(nn.Module):
         edge_rec_loss = None
         if not self.is_eval_mode:
 
-            # Convert PyG edge_index to dense adjacency matrix on CPU
-            num_nodes = num_cons + num_vars
-            adj = torch.zeros((num_nodes, num_nodes), device="cpu")
-
-            ei = edge_index.to("cpu")
-            if edge_weight is not None:
-                ew = edge_weight.to("cpu")
-                adj[ei[0], ei[1]] = ew
+            # Use pre-computed adjacency if provided, otherwise build on CPU (fallback)
+            if adj_gpu is not None:
+                adj = adj_gpu
             else:
-                adj[ei[0], ei[1]] = 1.0
+                # Convert PyG edge_index to dense adjacency matrix on CPU
+                num_nodes = num_cons + num_vars
+                adj = torch.zeros((num_nodes, num_nodes), device="cpu")
+
+                ei = edge_index.to("cpu")
+                if edge_weight is not None:
+                    ew = edge_weight.to("cpu")
+                    adj[ei[0], ei[1]] = ew
+                else:
+                    adj[ei[0], ei[1]] = 1.0
 
             # Reconstruction Loss (other losses are calculated in training code)
             feature_rec_loss = self.lambda_node * F.mse_loss(feature_tensor, quantized_node)
@@ -455,6 +466,9 @@ class Forge(nn.Module):
         super().train()
         self.to(self.device)
 
+        # let cuDNN autotune for fixed-size ops
+        torch.backends.cudnn.benchmark = True
+
         # Default to config values, but overwrite if a value is given
         epochs = overwrite_if_given(self.epochs, epochs)
         steps_per_instance = overwrite_if_given(self.steps_per_instance, steps_per_instance)
@@ -497,17 +511,34 @@ class Forge(nn.Module):
                 edge_index = mipinfo.edge_index.to(self.device)
                 edge_weight = mipinfo.edge_weight.to(self.device)
 
+                # Pre-compute adjacency on GPU once (instead of in the for-loop below)
+                adj_gpu = torch.zeros((num_nodes, num_nodes), device=self.device)
+                if edge_weight is not None:
+                    adj_gpu[edge_index[0], edge_index[1]] = edge_weight
+                else:
+                    adj_gpu[edge_index[0], edge_index[1]] = 1.0
+
                 # Train on this instance for specified steps
                 instance_loss_list = []
                 for step in range(steps_per_instance):
+
+                    # zero gradients before forward (use set_to_none for speed)
+                    optimizer.zero_grad(set_to_none=True)
+
                     # Compute loss and prediction
                     h_list, logits, loss, indices, codebook_ = self.forward(features,
                                                                             mipinfo.num_cons, mipinfo.num_vars,
-                                                                            edge_index, edge_weight)
+                                                                            edge_index, edge_weight, adj_gpu)
                     instance_loss_list.append(loss.item())
-                    optimizer.zero_grad()
+                    # optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+
+                    # explicitly delete large temporaries to free memory faster
+                    del h_list, logits, loss, indices, codebook_
+
+                # Synchronize after each instance to prevent queue buildup
+                torch.cuda.synchronize()
 
                 # End of instance steps, add average instance loss to epoch loss
                 avg_instance_loss = float(np.mean(instance_loss_list)) if len(instance_loss_list) > 0 else 0.0
@@ -520,7 +551,9 @@ class Forge(nn.Module):
                           ", Avg. Epoch Loss,", np.round(np.mean(epoch_loss_list), 3),
                           ", ", mipinfo.instance_name)
 
-                torch.cuda.empty_cache()
+                    # periodic cleanup to reduce fragmentation
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
             # End of epoch, add average epoch loss to main loss list
             main_loss_list.append(np.round(np.mean(epoch_loss_list), 3))
