@@ -481,7 +481,6 @@ class Forge(nn.Module):
                 self.lambda_edge = 10
 
             # MIP instances in dataset
-            loss = None
             for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
@@ -514,11 +513,12 @@ class Forge(nn.Module):
                 avg_instance_loss = float(np.mean(instance_loss_list)) if len(instance_loss_list) > 0 else 0.0
                 epoch_loss_list.append(avg_instance_loss)
 
-                print("Epoch,", epoch,
-                      ", Idx,", idx,
-                      ", Avg. Instance Loss,", np.round(avg_instance_loss, 3),
-                      ", Avg. Epoch Loss,", np.round(np.mean(epoch_loss_list), 3),
-                      ", ", mipinfo.instance_name)
+                if idx % 50 == 0:
+                    print("Epoch,", epoch,
+                          ", Idx,", idx,
+                          ", Avg. Instance Loss,", np.round(avg_instance_loss, 3),
+                          ", Avg. Epoch Loss,", np.round(np.mean(epoch_loss_list), 3),
+                          ", ", mipinfo.instance_name)
 
                 torch.cuda.empty_cache()
 
