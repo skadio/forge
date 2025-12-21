@@ -1,12 +1,16 @@
+import gc
 import os
 from typing import Union, List, Sequence, Dict, Optional
 
 import gurobipy as gp
+from tqdm import tqdm
+import torch
+import numpy as np
 
 from forge.embeddings import Forge
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPProcessor, _MIPUtils, MIPEmbeddings, MIPInfo
-from forge.utils import check_true, save_pickle, load_pickle
+from forge.utils import check_true, save_pickle, load_pickle, save_mip_embeddings_hdf5
 
 
 def finetune_integral_gap(forge: Forge,
@@ -208,7 +212,8 @@ def mip_to_embeddings(forge: Forge,
                       model_type: str,
                       input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
                       input_mip_instances_file: Optional[str],
-                      output_mip_to_embeddings_pkl: str) -> Dict[str, MIPEmbeddings]:
+                      output_mip_to_embeddings_pkl: str,
+                      instance_embedding_only: bool) -> Dict[str, MIPEmbeddings]:
     """
     Generate embeddings for one or more MIP inputs using a trained Forge instance.
 
@@ -242,7 +247,6 @@ def mip_to_embeddings(forge: Forge,
 
     # Load pre-trained Forge model
     forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
-
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
@@ -251,10 +255,21 @@ def mip_to_embeddings(forge: Forge,
     # Start Gurobi environment
     gurobi_env = _MIPUtils.start_gurobi_env()
 
+    def _move_to_cpu_and_detach(obj):
+        """Recursively move torch.Tensors to CPU and detach; preserve containers."""
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        if isinstance(obj, (list, tuple)):
+            converted = [_move_to_cpu_and_detach(x) for x in obj]
+            return type(obj)(converted)
+        if isinstance(obj, dict):
+            return {k: _move_to_cpu_and_detach(v) for k, v in obj.items()}
+        return obj
+
     # For each MIP item, create MIP model, and generate embedding
     mip_to_embeddings = {}
-    for mip_item in mip_items:
-        print("<< Start: Generate embeddings:", mip_item)
+    for idx, mip_item in enumerate(tqdm(mip_items)):
+        print("\n<< Start:", mip_item)
 
         # Read MIP file to a Gurobi model (or use the provided model)
         if isinstance(mip_item, gp.Model):
@@ -264,16 +279,38 @@ def mip_to_embeddings(forge: Forge,
             mip_model = gp.read(mip_item, env=gurobi_env)
             key = mip_item
 
+        # Inference without building grads
         # Convert MIP to vector representation
-        mip_embeddings = forge._mip_model_to_embeddings(mip_model)
+        with torch.no_grad():
+            mip_embeddings = forge._mip_model_to_embeddings(mip_model, instance_embedding_only)
+
+        # Move all tensors in the returned embeddings to CPU and detach
+        for name, val in vars(mip_embeddings).items():
+            try:
+                setattr(mip_embeddings, name, _move_to_cpu_and_detach(val))
+            except Exception:
+                # If attribute can't be processed, leave it (safe fallback)
+                pass
+
         mip_to_embeddings[key] = mip_embeddings
 
-        print(">> Finish: Generate embeddings:", mip_item)
+        # Cleanup large refs
+        del mip_embeddings
+        if not isinstance(mip_item, gp.Model): # don't delete user-provided models
+            del mip_model
+
+         # Periodic cleanup to avoid fragmentation (adjust frequency as needed)
+        if idx % 50 == 0:
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        print(">> Finish:", mip_item)
 
     # Close Gurobi environment
     gurobi_env.close()
 
-    save_pickle(mip_to_embeddings, output_mip_to_embeddings_pkl)
+    # save_pickle(mip_to_embeddings, output_mip_to_embeddings_pkl)
+    save_mip_embeddings_hdf5(mip_to_embeddings, output_mip_to_embeddings_pkl, dtype=np.float16)
 
     return mip_to_embeddings
 

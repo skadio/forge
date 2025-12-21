@@ -1,12 +1,15 @@
 import modal
 
-# Manually create a mount of all instances from command line
+# Manually create `instances` volume and upload from local via cli
+# Manually create mip_to_mipinfo.pkl files and upload to HF via models/local_to_hf.py
+# Manually crate `models` volume and download from HF via models/hf_to_modal.py
 # Create: modal volume create instances
+# Create: modal volume create models
 # List: modal volume list
-# LS: modal volume ls instances
-# Upload: modal volume put instances . (inside forge/data/instances)
-# modal volume rename data instances
-#  modal volume rm instances configs -r
+# List: modal volume ls instances
+# Upload: modal volume put instances . (inside /data/instances)
+# Rename: modal volume rename data instances
+# Remove: modal volume rm instances configs -r
 instances_volume = modal.Volume.from_name("instances")
 models_volume = modal.Volume.from_name("models")
 
@@ -61,6 +64,7 @@ def run():
              output_log_file=f"/root/models/{config}_pretrained.log")
 
 # > modal run main.py
+# --detach flag to run in background, continue even terminal is closed
 @app.local_entrypoint()
 def main():
     # print(run.local())

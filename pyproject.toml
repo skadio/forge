@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "gurobipy",
+    "h5py",
     "huggingface-hub",
     "numpy",
     "pandas",

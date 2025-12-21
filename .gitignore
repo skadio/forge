@@ -214,6 +214,7 @@ __marimo__/
 /tests/data/instances/*relaxed*
 
 /models/*.pkl
+/models/*.hdf5
 /models/*.log
 
 # Ignore data

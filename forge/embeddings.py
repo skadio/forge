@@ -1,4 +1,5 @@
 import gc
+import os
 import time
 from typing import List, Callable, Optional, Tuple, Union, Dict
 
@@ -23,6 +24,7 @@ class Forge(nn.Module):
     This class constructs a GraphSAGE-based encoder, optional prediction heads, and a vector quantization module.
 
     """
+
     def __init__(self,
                  train_config_yaml: Optional[str] = Constants.default_train_config_yaml,
                  input_dim: Optional[int] = None,
@@ -522,7 +524,6 @@ class Forge(nn.Module):
                 # Train on this instance for specified steps
                 instance_loss_list = []
                 for step in range(steps_per_instance):
-
                     # zero gradients before forward (use set_to_none for speed)
                     optimizer.zero_grad(set_to_none=True)
 
@@ -575,7 +576,16 @@ class Forge(nn.Module):
             t += epoch_summary + "\n"
 
             # Save epoch checkpoint
-            torch.save(self.state_dict(), str(epoch) + "_" + output_forge_pkl)
+            dirpath = os.path.dirname(output_forge_pkl)
+            base = os.path.basename(output_forge_pkl)
+            name, ext = os.path.splitext(base)
+            if epoch == epochs - 1:
+                # If last epoch, save to the original filename, otherwise add epoch suffix
+                save_path = output_forge_pkl
+            else:
+                save_path = os.path.join(dirpath if dirpath else ".", f"{name}_{epoch}{ext}")
+
+            torch.save(self.state_dict(), save_path)
 
             if output_log_file is not None:
                 with open(output_log_file, 'a') as file:
@@ -584,7 +594,7 @@ class Forge(nn.Module):
         # Set Forge as trained
         self.is_trained = True
 
-    def _mip_model_to_embeddings(self, mip_model: gp.Model) -> MIPEmbeddings:
+    def _mip_model_to_embeddings(self, mip_model: gp.Model, instance_embedding_only: bool) -> MIPEmbeddings:
         """
         Convert a Gurobi model into `MIPEmbeddings` using the trained Forge encoder.
 
@@ -644,15 +654,16 @@ class Forge(nn.Module):
         # for c in assigned_codes:
         #     instance_embedding[c] += 1
         instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
-
-        embedding_of_constraint = h_list[1][:mipinfo.num_cons]
-        embedding_of_variable = h_list[1][mipinfo.num_cons:]
-
-        mip_embeddings = MIPEmbeddings(instance_embedding=instance_embedding,
-                                       embedding_of_constraint=embedding_of_constraint,
-                                       embedding_of_variable=embedding_of_variable)
-
-        return mip_embeddings
+        if instance_embedding_only:
+            return MIPEmbeddings(instance_embedding=instance_embedding,
+                                 embedding_of_constraint=None,
+                                 embedding_of_variable=None)
+        else:
+            embedding_of_constraint = h_list[1][:mipinfo.num_cons]
+            embedding_of_variable = h_list[1][mipinfo.num_cons:]
+            return MIPEmbeddings(instance_embedding=instance_embedding,
+                                 embedding_of_constraint=embedding_of_constraint,
+                                 embedding_of_variable=embedding_of_variable)
 
     def _finetune_integral_gap(self,
                                input_mip_to_gapinfo: Dict[str, GapInfo],
