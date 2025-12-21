@@ -574,7 +574,8 @@ class Forge(nn.Module):
             print(epoch_summary)
             t += epoch_summary + "\n"
 
-            torch.save(self.state_dict(), output_forge_pkl)
+            # Save epoch checkpoint
+            torch.save(self.state_dict(), str(epoch) + "_" + output_forge_pkl)
 
             if output_log_file is not None:
                 with open(output_log_file, 'a') as file:
