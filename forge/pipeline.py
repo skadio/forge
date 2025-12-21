@@ -307,8 +307,8 @@ def mip_to_embeddings(forge: Forge,
     # Close Gurobi environment
     gurobi_env.close()
 
-    # save_pickle(mip_to_embeddings, output_mip_to_embeddings_pkl)
-    save_mip_embeddings_hdf5(mip_to_embeddings, output_mip_to_embeddings_pkl, dtype=np.float16)
+    save_pickle(mip_to_embeddings, output_mip_to_embeddings_pkl)
+    # save_mip_embeddings_hdf5(mip_to_embeddings, output_mip_to_embeddings_pkl, dtype=np.float16)
 
     return mip_to_embeddings
 

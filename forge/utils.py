@@ -36,7 +36,7 @@ class Constants(NamedTuple):
     _TESTS_DIR_NAME = "tests"
     _TRAIN_CONFIG_NAME = "train_config.yaml"
     _MIPINFO_NAME = "mip_to_mipinfo.pkl"
-    _EMBEDDINGS_NAME = "mip_to_embeddings.hdf5"
+    _EMBEDDINGS_NAME = "mip_to_embeddings.pkl"
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
     _FORGE_PKL_NAME = "forge_pretrained.pkl"
     _FORGE_LOG_NAME = "forge_pretrain.log"
