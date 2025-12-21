@@ -189,3 +189,25 @@ def load_mip_embeddings_hdf5(input_h5_path: str, reconstruct_fn=None, as_namespa
             else:
                 out[original_key] = loaded
     return out
+
+
+def convert_hdf5_to_pickle(input_h5_path: str, output_pickle_path: str,
+                           reconstruct_fn=None, as_namespace: bool = True) -> None:
+    """
+    Convert an HDF5 embeddings file to a pickle file.
+
+    Parameters
+    - `input_h5_path`: path to the HDF5 file (e.g. `mip_to_embeddings.hdf5`)
+    - `output_pickle_path`: path to write the pickle (e.g. `mip_to_embeddings.pkl`)
+    - `reconstruct_fn`: optional callable(key, loaded_dict) -> object to reconstruct original objects
+    - `as_namespace`: if True and no reconstruct_fn, convert records to SimpleNamespace
+    """
+    import os
+    import pickle
+
+    # use the existing loader in this module
+    data = load_mip_embeddings_hdf5(input_h5_path, reconstruct_fn=reconstruct_fn, as_namespace=as_namespace)
+
+    os.makedirs(os.path.dirname(output_pickle_path) or ".", exist_ok=True)
+    with open(output_pickle_path, "wb") as f:
+        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
