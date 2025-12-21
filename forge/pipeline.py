@@ -269,7 +269,7 @@ def mip_to_embeddings(forge: Forge,
     # For each MIP item, create MIP model, and generate embedding
     mip_to_embeddings = {}
     for idx, mip_item in enumerate(tqdm(mip_items)):
-        print("\n<< Start:", mip_item)
+        print("\n", mip_item)
 
         # Read MIP file to a Gurobi model (or use the provided model)
         if isinstance(mip_item, gp.Model):
@@ -303,8 +303,6 @@ def mip_to_embeddings(forge: Forge,
         if idx % 50 == 0:
             gc.collect()
             torch.cuda.empty_cache()
-
-        print(">> Finish:", mip_item)
 
     # Close Gurobi environment
     gurobi_env.close()
