@@ -26,7 +26,6 @@ forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
 # Create Modal app
 app = modal.App("Forge-ICLR-Pretrain", image=forge_image)
 
-
 # Nvidia B200 # $6.25 / h
 # Nvidia H200 # $4.54 / h
 # Nvidia H100 # $3.95 / h

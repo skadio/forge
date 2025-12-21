@@ -507,9 +507,10 @@ class Forge(nn.Module):
                     continue
 
                 # Push to device before the for-loop below
-                features = mipinfo.feature_tensor.to(self.device)
-                edge_index = mipinfo.edge_index.to(self.device)
-                edge_weight = mipinfo.edge_weight.to(self.device)
+                # Use non-blocking transfers to overlap compute and memory operations:
+                features = mipinfo.feature_tensor.to(self.device, non_blocking=True)
+                edge_index = mipinfo.edge_index.to(self.device, non_blocking=True)
+                edge_weight = mipinfo.edge_weight.to(self.device, non_blocking=True)
 
                 # Pre-compute adjacency on GPU once (instead of in the for-loop below)
                 adj_gpu = torch.zeros((num_nodes, num_nodes), device=self.device)
@@ -537,8 +538,12 @@ class Forge(nn.Module):
                     # explicitly delete large temporaries to free memory faster
                     del h_list, logits, loss, indices, codebook_
 
+                # Explicitly delete instance tensors after all steps complete
+                del features, edge_index, edge_weight, adj_gpu
+
                 # Synchronize after each instance to prevent queue buildup
-                torch.cuda.synchronize()
+                # This might add overhead -- remove
+                # torch.cuda.synchronize()
 
                 # End of instance steps, add average instance loss to epoch loss
                 avg_instance_loss = float(np.mean(instance_loss_list)) if len(instance_loss_list) > 0 else 0.0
@@ -549,10 +554,13 @@ class Forge(nn.Module):
                           ", Idx,", idx,
                           ", Avg. Instance Loss,", np.round(avg_instance_loss, 3),
                           ", Avg. Epoch Loss,", np.round(np.mean(epoch_loss_list), 3),
+                          ", Current Time,", np.round(time.time() - epoch_start, 3),
                           ", ", mipinfo.instance_name)
 
-                    # periodic cleanup to reduce fragmentation
+                # Periodic cleanup to reduce fragmentation
+                if idx % 10 == 0:
                     gc.collect()
+                    # if memory is tight, this can be after each instance
                     torch.cuda.empty_cache()
 
             # End of epoch, add average epoch loss to main loss list
@@ -561,7 +569,7 @@ class Forge(nn.Module):
             epoch_summary = (">>> DONE! Epoch, " + str(epoch) +
                              " , Avg. Epoch Loss, " + str(np.round(np.mean(epoch_loss_list), 3)) +
                              " , +/-," + str(np.round(np.std(epoch_loss_list), 3)) +
-                             " , Epoch Time, " + np.round(time.time() - epoch_start, 3) +
+                             " , Epoch Time, " + str(np.round(time.time() - epoch_start, 3)) +
                              " , Avg. Main Loss, " + str(np.round(np.mean(main_loss_list), 3)))
             print(epoch_summary)
             t += epoch_summary + "\n"

@@ -69,6 +69,72 @@ def blockwise_loss(quantized_one: torch.Tensor,
                    num_cons: int,
                    lambda_edge: float = 1.0,
                    batch_size: int = 1024) -> torch.Tensor:
+
+    # old_blockwise_loss
+    #   - re-maps every slice with .to(device) even when already on GPU,
+    #   creating many temporary allocations and fragmenting memory.
+    #   - re-maps every slice with .to(device) even when already on GPU, creating many temporary allocations and fragmenting memory.
+    #   - reconstructs full (N\times N) blocks and even multiplies two (B\times B) matrices, which is cubic in the block size and ignores the bipartite structure (num_cons is unused).
+    #   - Dense adj_gpu = torch.zeros((num_nodes, num_nodes), device=...) per instance can bloat VRAM; large allocations slow the CUDA allocator over time.
+    # A lighter blockwise_loss that
+    # (a) respects the bipartite block,
+    # (b) avoids redundant .to(device), and
+    # (c) only copies the needed target slice per block:
+    device = quantized_one.device
+    N = quantized_one.size(0)
+    num_vars = N - num_cons
+
+    sum_sq = torch.zeros((), device=device)
+    sum_sq_pos = torch.zeros((), device=device)
+    count_all = 0
+
+    # Pre-extract constraint embeddings once (avoid repeated slicing)
+    q1_con = quantized_one[:num_cons]
+    q2_con = quantized_two[:num_cons]
+
+    # Only variable rows (num_cons:) vs constraint cols (:num_cons)
+    for start in range(0, num_vars, batch_size):
+        end = min(start + batch_size, num_vars)
+        var_idx_start = num_cons + start
+        var_idx_end = num_cons + end
+
+        q1_var = quantized_one[var_idx_start:var_idx_end]
+        q2_var = quantized_two[var_idx_start:var_idx_end]
+
+        recon = (q1_var @ q1_con.T) * (q2_var @ q2_con.T)
+
+        block_min = recon.min()
+        block_max = recon.max()
+        recon = (recon - block_min) / (block_max - block_min + 1e-8)
+
+        tgt_block = target_adj_cpu[var_idx_start:var_idx_end, :num_cons].to(device, non_blocking=True)
+
+        diff = tgt_block - recon
+        sq = diff.pow(2)
+        edge_scale = (tgt_block > 0).to(recon.dtype)
+        sq_pos = sq * edge_scale
+
+        sum_sq += sq.sum()
+        sum_sq_pos += sq_pos.sum()
+        count_all += sq.numel()
+
+        # Explicit cleanup
+        del q1_var, q2_var, recon, tgt_block, diff, sq, edge_scale
+
+    if count_all == 0:
+        return torch.zeros((), device=device)
+
+    mse = sum_sq / count_all
+    pos_mean = sum_sq_pos / count_all
+    return lambda_edge * (torch.sqrt(mse) + pos_mean)
+
+
+def old_blockwise_loss(quantized_edge_1: torch.Tensor,
+                   quantized_edge_2: torch.Tensor,
+                   target_adj_cpu: torch.Tensor,
+                   num_cons: int,
+                   lambda_edge: float = 1.0,
+                   batch_size: int = 1024) -> torch.Tensor:
     """Blockwise edge reconstruction loss on the bipartite submatrix.
 
     This computes the loss only on the bipartite portion of the adjacency
@@ -79,9 +145,9 @@ def blockwise_loss(quantized_one: torch.Tensor,
     ----------
     self : nn.Module
         Module that owns ``device`` attribute (e.g., ``Forge``).
-    quantized_one : torch.Tensor
+    quantized_edge_1 : torch.Tensor
         First decoded edge factor matrix of shape ``(N, d)``.
-    quantized_two : torch.Tensor
+    quantized_edge_2 : torch.Tensor
         Second decoded edge factor matrix of shape ``(N, d)``.
     target_adj_cpu : torch.Tensor
         Dense adjacency matrix on CPU of shape ``(N, N)``.
@@ -101,7 +167,7 @@ def blockwise_loss(quantized_one: torch.Tensor,
     """
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    N = quantized_one.size(0)
+    N = quantized_edge_1.size(0)
 
     # Running sums (kept as tensors for autograd)
     sum_sq = torch.zeros((), device=device)
@@ -118,10 +184,10 @@ def blockwise_loss(quantized_one: torch.Tensor,
         end = min(start + batch_size, N)
 
         # Batch × d, move to device
-        block_one = quantized_one[start:end, :].to(device)
+        block_one = quantized_edge_1[start:end, :].to(device)
         recon_block = block_one @ block_one.T
 
-        block_two = quantized_two[start:end, :].to(device)
+        block_two = quantized_edge_2[start:end, :].to(device)
         recon_block_two = block_two @ block_two.T
 
         # Merge both reconstructions
