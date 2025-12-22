@@ -53,8 +53,8 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 # Pretraining log is stored in output_log_file with loss curves and training details
 mip_to_mipinfo(forge=forge,
                input_mip_folder="./data/instances/",
-               input_mip_instances_file="./data/configs/test_pretrain.txt",
-               output_mip_to_mipinfo_pkl="./models/forge_pretrained.pkl",
+               input_mip_instances_file="./data/configs/test.txt",
+               output_mip_to_mipinfo_pkl="./models/test_mip_to_mipinfo.pkl",
                relaxation_list=[0.05, 0.01],
                num_parallel_workers=1)
 ```

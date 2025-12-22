@@ -54,14 +54,14 @@ def run():
 
     forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 
-    config="iclr26_pretrain"
+    config="iclr_pretrain_clusters_with_relaxed"
     pretrain(forge=forge,
              input_mip_folder="/root/data/instances/",
              input_mip_instances_file=f"/root/data/configs/{config}.txt",
              output_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
              input_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
-             output_forge_pretrained_pkl=f"/root/models/{config}_pretrained.pkl",
-             output_log_file=f"/root/models/{config}_pretrained.log")
+             output_forge_pretrained_pkl=f"/root/models/{config}_trained.pkl",
+             output_log_file=f"/root/models/{config}_trained.log")
 
 # > modal run main.py
 # --detach flag to run in background, continue even terminal is closed
