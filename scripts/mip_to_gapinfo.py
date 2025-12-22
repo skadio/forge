@@ -13,7 +13,7 @@ if __name__ == "__main__":
                         help='Path to pre-trained or fine-tuned Forge pickle file')
     parser.add_argument('--input_mips', type=str, default='../data/instances',
                         help='Path to MIP file, directory, or model')
-    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/pretrain.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
                         help='Directory containing input MIP instance files')
     parser.add_argument('--output_mip_to_gapinfo_pkl', type=str, default='../models/output_mip_to_gapinfo_pkl',
                         help='Output pickle file for gap info')

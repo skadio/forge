@@ -5,7 +5,19 @@ You can download and unzip the dataset from Hugging Face using the `/data/downlo
 Our instances consist of MIPLIB, D-MIPLIB, StrIPlib. 
 
 Each `/data/configs/*.txt` file lists the names of the instances included in a specific task:
-
+* all.txt
+  * This file contains all MIP instances from dmiplib, miplib and strIPlib.
+* all_dmiplib.txt
+  * D-MIPLIB has ~800 training instances per problem type-difficulty pair
+  * These instances are the first 100 instances from the train directory for each problem type in D-MIPLIB.
+  * These instances span 31 problem type-difficulty pairs
+* all_miplib.txt
+  * These are ~1000 instances from MIPLIB 2017. 
+* all_striplib.txt
+  * These are ~1700 strIPlib instances
+  * These instances span 10 problem types. 
+    
+## OUTDATED!! 
 * pretrain.txt
   This file contains all MIP instances. Specifically, it contains
   * ~1000 MIPLIB instances, sorted by size to remove any instances greater than 20 MB in the compressed format. 
@@ -24,17 +36,9 @@ Each `/data/configs/*.txt` file lists the names of the instances included in a s
   * test_integral_gap.txt
     * These instances span 32 problem type-difficulty pairs from D-MIPLIB.
     * These are all of the instances from the test directory of D-MIPLIB. 
-* fine_tune_variable_proba.txt
-  * These are the same instances as `fine_tune_integral_gap.txt`
-  * test_variable_proba.txt
-    * These are the same instances as `test_integral_gap.txt`
 
-* miplib.txt
-  * These are ~1000 instances from MIPLIB 2017 from the `pretrain.txt` file.
-* dmiplib.txt
-  * These are all the D-MIPLIB instances from the `pretrain.txt` file. 
 
-The ICLR'26 paper experiments are denoted with prefix `iclr26_`:
+The ICLR'26 paper experiments are denoted with prefix `iclr_`:
 
 * iclr26_pretrain.txt
   * These are ~600 MIPLIB instances sorted by size (ascending). 
@@ -49,3 +53,29 @@ The ICLR'26 paper experiments are denoted with prefix `iclr26_`:
   * 100 instances each of CA (easy, medium), SC (easy, medium, hard) and GISP (easy, medium) for a total of 700 training instances. 
   * iclr26_test_variable_proba.txt
     * 100 instances each of medium CA, SC, GISP and MVC.
+
+# Sort file content respecting numbers in filenames
+ sort -V -o all.txt all.txt
+ 
+# iclr_test_clusters.txt
+1000 DMIPLIB instances, 50 each, from: 
+CA-easy
+CA-medium
+CA-very-hard
+CA-very-hard2
+GISP-easy
+GISP-medium
+GISP-hard
+GISP-very-hard
+IP-very-hard
+MIS-easy
+MIS-medium
+MIS-very-hard
+MVC-easy
+MVC-medium
+MVC-hard
+MVC-very-hard
+SC-easy
+SC-medium
+SC-hard
+SC-very-hard

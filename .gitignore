@@ -213,6 +213,7 @@ __marimo__/
 # Ignore relaxed test instances
 /tests/data/instances/*relaxed*
 
+/models/old/
 /models/*.pkl
 /models/*.hdf5
 /models/*.log

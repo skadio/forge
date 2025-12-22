@@ -39,7 +39,7 @@ class ReadmeTest(BaseTest):
             "scripts.pretrain",
             "--train_config_yaml", os.path.join(project_root, "forge", "configs", "train_config.yaml"),
             "--input_mip_folder", os.path.join(project_root, "data", "instances"),
-            "--input_mip_instances_file", os.path.join(project_root, "data", "configs", "pretrain.txt"),
+            "--input_mip_instances_file", os.path.join(project_root, "data", "configs", "all.txt"),
             "--output_mip_to_mipinfo_pkl", os.path.join(project_root, "models", "mip_to_mipinfo.pkl"),
             "--output_forge_pretrained_pkl", os.path.join(project_root, "models", "forge_pretrained.pkl"),
             "--output_log_file", os.path.join(project_root, "models", "forge_pretrained.log"),

@@ -1,9 +1,6 @@
-import urllib.parse
 import os
 import pickle
 from typing import Union, NamedTuple
-import h5py
-import torch
 
 import numpy as np
 import scipy.sparse as sp
@@ -38,8 +35,8 @@ class Constants(NamedTuple):
     _MIPINFO_NAME = "mip_to_mipinfo.pkl"
     _EMBEDDINGS_NAME = "mip_to_embeddings.pkl"
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
-    _FORGE_PKL_NAME = "forge_pretrained.pkl"
-    _FORGE_LOG_NAME = "forge_pretrain.log"
+    _FORGE_PKL_NAME = "trained.pkl"
+    _FORGE_LOG_NAME = "trained.log"
     _UNIT_TEST_INSTANCES_NAME = "instances_unit_test.txt"
 
     # Folders
@@ -128,86 +125,86 @@ def copy_params(old_model, new_model):
             large_state_dict[name].copy_(param)
 
 
-def _to_numpy(x, dtype=None):
-    if x is None:
-        return None
-    if isinstance(x, torch.Tensor):
-        arr = x.detach().cpu().numpy()
-    else:
-        arr = np.asarray(x)
-    if dtype is not None:
-        return arr.astype(dtype)
-    return arr
-
-
-def _safe_group_name(key: str) -> str:
-    """
-    Encode arbitrary string to a name safe for HDF5 groups (no '/').
-    Uses percent-encoding so it is reversible.
-    """
-    return urllib.parse.quote(str(key), safe="")
-
-
-def save_mip_embeddings_hdf5(mip_to_embeddings: dict, output_h5_path: str,
-                             dtype=np.float32, compression="gzip", compression_opts=4):
-    os.makedirs(os.path.dirname(output_h5_path) or ".", exist_ok=True)
-    with h5py.File(output_h5_path, "w") as hf:
-        for key, emb in mip_to_embeddings.items():
-            grp_name = _safe_group_name(str(key))
-            g = hf.create_group(grp_name)
-            # store original key so we can restore exact path when loading
-            g.attrs['orig_key'] = str(key)
-            for attr in ("instance_embedding", "embedding_of_constraint", "embedding_of_variable"):
-                val = getattr(emb, attr, None)
-                arr = _to_numpy(val, dtype=dtype if val is not None else None)
-                if arr is None:
-                    # create an empty dataset to preserve the field and mark it as None
-                    ds = g.create_dataset(attr, shape=(0,), dtype=dtype)
-                    ds.attrs['is_none'] = True
-                else:
-                    ds = g.create_dataset(attr, data=arr, compression=compression, compression_opts=compression_opts)
-                    ds.attrs['is_none'] = False
-
-def load_mip_embeddings_hdf5(input_h5_path: str, reconstruct_fn=None, as_namespace: bool = True):
-    import types
-    out = {}
-    with h5py.File(input_h5_path, "r") as hf:
-        for grp_name in hf:
-            grp = hf[grp_name]
-            loaded = {}
-            for ds_name, ds in grp.items():
-                if ds.attrs.get('is_none', False):
-                    loaded[ds_name] = None
-                else:
-                    loaded[ds_name] = ds[()]
-            # prefer stored original key; fallback to group name
-            original_key = grp.attrs.get('orig_key', grp_name)
-            if reconstruct_fn:
-                out[original_key] = reconstruct_fn(original_key, loaded)
-            elif as_namespace:
-                out[original_key] = types.SimpleNamespace(**loaded)
-            else:
-                out[original_key] = loaded
-    return out
-
-
-def convert_hdf5_to_pickle(input_h5_path: str, output_pickle_path: str,
-                           reconstruct_fn=None, as_namespace: bool = True) -> None:
-    """
-    Convert an HDF5 embeddings file to a pickle file.
-
-    Parameters
-    - `input_h5_path`: path to the HDF5 file (e.g. `mip_to_embeddings.hdf5`)
-    - `output_pickle_path`: path to write the pickle (e.g. `mip_to_embeddings.pkl`)
-    - `reconstruct_fn`: optional callable(key, loaded_dict) -> object to reconstruct original objects
-    - `as_namespace`: if True and no reconstruct_fn, convert records to SimpleNamespace
-    """
-    import os
-    import pickle
-
-    # use the existing loader in this module
-    data = load_mip_embeddings_hdf5(input_h5_path, reconstruct_fn=reconstruct_fn, as_namespace=as_namespace)
-
-    os.makedirs(os.path.dirname(output_pickle_path) or ".", exist_ok=True)
-    with open(output_pickle_path, "wb") as f:
-        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+# def _to_numpy(x, dtype=None):
+#     if x is None:
+#         return None
+#     if isinstance(x, torch.Tensor):
+#         arr = x.detach().cpu().numpy()
+#     else:
+#         arr = np.asarray(x)
+#     if dtype is not None:
+#         return arr.astype(dtype)
+#     return arr
+#
+#
+# def _safe_group_name(key: str) -> str:
+#     """
+#     Encode arbitrary string to a name safe for HDF5 groups (no '/').
+#     Uses percent-encoding so it is reversible.
+#     """
+#     return urllib.parse.quote(str(key), safe="")
+#
+#
+# def save_mip_embeddings_hdf5(mip_to_embeddings: dict, output_h5_path: str,
+#                              dtype=np.float32, compression="gzip", compression_opts=4):
+#     os.makedirs(os.path.dirname(output_h5_path) or ".", exist_ok=True)
+#     with h5py.File(output_h5_path, "w") as hf:
+#         for key, emb in mip_to_embeddings.items():
+#             grp_name = _safe_group_name(str(key))
+#             g = hf.create_group(grp_name)
+#             # store original key so we can restore exact path when loading
+#             g.attrs['orig_key'] = str(key)
+#             for attr in ("instance_embedding", "embedding_of_constraint", "embedding_of_variable"):
+#                 val = getattr(emb, attr, None)
+#                 arr = _to_numpy(val, dtype=dtype if val is not None else None)
+#                 if arr is None:
+#                     # create an empty dataset to preserve the field and mark it as None
+#                     ds = g.create_dataset(attr, shape=(0,), dtype=dtype)
+#                     ds.attrs['is_none'] = True
+#                 else:
+#                     ds = g.create_dataset(attr, data=arr, compression=compression, compression_opts=compression_opts)
+#                     ds.attrs['is_none'] = False
+#
+# def load_mip_embeddings_hdf5(input_h5_path: str, reconstruct_fn=None, as_namespace: bool = True):
+#     import types
+#     out = {}
+#     with h5py.File(input_h5_path, "r") as hf:
+#         for grp_name in hf:
+#             grp = hf[grp_name]
+#             loaded = {}
+#             for ds_name, ds in grp.items():
+#                 if ds.attrs.get('is_none', False):
+#                     loaded[ds_name] = None
+#                 else:
+#                     loaded[ds_name] = ds[()]
+#             # prefer stored original key; fallback to group name
+#             original_key = grp.attrs.get('orig_key', grp_name)
+#             if reconstruct_fn:
+#                 out[original_key] = reconstruct_fn(original_key, loaded)
+#             elif as_namespace:
+#                 out[original_key] = types.SimpleNamespace(**loaded)
+#             else:
+#                 out[original_key] = loaded
+#     return out
+#
+#
+# def convert_hdf5_to_pickle(input_h5_path: str, output_pickle_path: str,
+#                            reconstruct_fn=None, as_namespace: bool = True) -> None:
+#     """
+#     Convert an HDF5 embeddings file to a pickle file.
+#
+#     Parameters
+#     - `input_h5_path`: path to the HDF5 file (e.g. `mip_to_embeddings.hdf5`)
+#     - `output_pickle_path`: path to write the pickle (e.g. `mip_to_embeddings.pkl`)
+#     - `reconstruct_fn`: optional callable(key, loaded_dict) -> object to reconstruct original objects
+#     - `as_namespace`: if True and no reconstruct_fn, convert records to SimpleNamespace
+#     """
+#     import os
+#     import pickle
+#
+#     # use the existing loader in this module
+#     data = load_mip_embeddings_hdf5(input_h5_path, reconstruct_fn=reconstruct_fn, as_namespace=as_namespace)
+#
+#     os.makedirs(os.path.dirname(output_pickle_path) or ".", exist_ok=True)
+#     with open(output_pickle_path, "wb") as f:
+#         pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)

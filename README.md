@@ -32,7 +32,7 @@ mip_to_mipinfo(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl --relaxation_list 0.05 0.01 --num_parallel_workers 1
+python -m scripts.mip_to_mipinfo --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/all.txt --output_mip_to_mipinfo_pkl ./models/mip_to_mipinfo.pkl --relaxation_list 0.05 0.01 --num_parallel_workers 1
 ```
 
 ## Pre-Train Embeddings
@@ -58,8 +58,8 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 # Pretraining log is stored in output_log_file with loss curves and training details
 pretrain(forge=forge,
          input_mip_folder="./data/instances/",
-         input_mip_instances_file="./data/configs/pretrain.txt",
-         output_mip_to_mipinfo_pkl="./models/iclr26_pretrain_mip_to_mipinfo.pkl",
+         input_mip_instances_file="data/configs/all.txt",
+         output_mip_to_mipinfo_pkl="./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl",
          output_forge_pretrained_pkl="./models/forge_pretrained.pkl",
          output_log_file="./models/forge_pretrained.log")
 ```
@@ -67,7 +67,7 @@ pretrain(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/pretrain.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr26_pretrain_mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
+python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/all.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
 ```
 
 ## Generate Embeddings
@@ -115,16 +115,16 @@ finetune_integral_gap(forge=forge,
                       input_forge_pkl="./models/forge_pretrained.pkl",
                       model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                       input_mip_folder="./data/instances/",
-                      input_mip_instances_file="./data/configs/fine_tune_integral_gap.txt",
+                      input_mip_instances_file="data/configs/tune_integral_gap.txt",
                       output_forge_finetuned_pkl="./models/forge_integral_gap.pkl",
                       output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
-                      num_parallel_workers = 5)
+                      num_parallel_workers=5)
 ```
 
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/fine_tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
+python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
 ```
 
 ## Predict Integral Gap

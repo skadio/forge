@@ -11,9 +11,9 @@ if __name__ == "__main__":
                         help='Path to the training configuration YAML file')
     parser.add_argument('--input_mip_folder', type=str, default='../data/instances/',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/pretrain.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='../models/iclr26_pretrain_mip_to_mipinfo.pkl',
+    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='../models/iclr_pretrain_clusters_mip_to_mipinfo.pkl',
                         help='Output path for the mip_to_mipinfo pickle')
     parser.add_argument('--output_forge_pretrained_pkl', type=str, default='../models/forge_pretrained.pkl',
                         help='Output path for the pretrained Forge pickle')

@@ -20,7 +20,7 @@ if __name__ == "__main__":
                                                                  Constants.FORGE_FINE_TUNE_VARIABLE_PROBA])))
     parser.add_argument('--input_mips', type=str, default='../data/instances/',
                         help='Path to MIP file, directory, or model')
-    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/pretrain.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
                         help='Directory containing input MIP instance files')
     parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='../models/mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
