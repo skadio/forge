@@ -10,7 +10,7 @@ import numpy as np
 from forge.embeddings import Forge
 from forge.labeler import MIPLabeler, GapInfo
 from forge.processor import MIPProcessor, _MIPUtils, MIPEmbeddings, MIPInfo
-from forge.utils import check_true, save_pickle, load_pickle, save_mip_embeddings_hdf5
+from forge.utils import check_true, save_pickle, load_pickle
 
 
 def finetune_integral_gap(forge: Forge,
