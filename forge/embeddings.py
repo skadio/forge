@@ -498,6 +498,7 @@ class Forge(nn.Module):
                 self.lambda_edge = 10
 
             # MIP instances in dataset
+            # TODO: thinking loud: should we shuffle instances each epoch? Or start size-wise and shuffle later
             for idx in range(len(input_mipinfo_list)):
 
                 mipinfo = input_mipinfo_list[idx]
