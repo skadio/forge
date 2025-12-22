@@ -14,6 +14,7 @@ Notes
 - Many helper functions assume Gurobi model APIs such as getVars, getConstrs and getA.
 """
 import os
+import warnings
 from typing import List, Dict, Optional, Union
 
 import gurobipy as gp
@@ -198,7 +199,7 @@ class MIPProcessor:
 
             # Convert each MIP instance to MIPInfo object and store in dictionary
             for idx in tqdm(range(len(sorted_mip_files))):
-                print("<< Start: Convert to mipinfo:", sorted_mip_files[idx])
+                
                 # Create a local dictionary for this instance (and its relaxations)
                 idx_to_mipinfo_dict = MIPProcessor._mip_file_to_mipinfo_dict(sorted_mip_files[idx], gurobi_env,
                                                                              self.rng, relaxation_list, is_save_relaxed)
@@ -228,15 +229,26 @@ class MIPProcessor:
     @staticmethod
     def _mip_file_to_mipinfo_dict(mip_file: str, gurobi_env, rng,
                                   relaxation_list: List[float], is_save_relaxed: bool) -> Optional[Dict[str, MIPInfo]]:
-
+        
+        print("<< Start: Convert to mipinfo:", mip_file)
+        
         mip_to_mipinfo_local: Dict[str, MIPInfo] = {}
 
         # Read MIP file to a Gurobi model
         mip_model = gp.read(mip_file, env=gurobi_env)
 
-        # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
+        # Generate MIPInfo object from original model, set name, and add to dictionary
+        # Catch numeric issues during conversion in feature normalization
         try:
-            mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+            # Convert NumPy invalid-value operations into FloatingPointError
+            with np.errstate(invalid='raise'):
+                # Turn RuntimeWarning into an exception for this call
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", category=RuntimeWarning)
+                    mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+        except (FloatingPointError, RuntimeWarning) as e:
+            print(f"Error: Numeric Issue to convert MIP {mip_file} to MIPInfo due to error: {e}")
+            return None
         except Exception as e:
             print(f"Error: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
             return None
@@ -272,8 +284,17 @@ class MIPProcessor:
                         print(f"Retrying due to exception: {e}")
 
                 # Generate MIPInfo object from relaxed model, set name, and add to dictionary
+                # Catch numeric issues during conversion in feature normalization
                 try:
-                    mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model_relaxed)
+                    # Convert NumPy invalid-value operations into FloatingPointError
+                    with np.errstate(invalid='raise'):
+                        # Turn RuntimeWarning into an exception for this call
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("error", category=RuntimeWarning)
+                            mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+                except (FloatingPointError, RuntimeWarning) as e:
+                    print(f"Error: Numeric Issue to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
+                    continue
                 except Exception as e:
                     print(f"Error: Failed to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
                     continue

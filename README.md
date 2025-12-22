@@ -1,6 +1,35 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
 Forge is a research library designed for representational learning in combinatorial problems.
 
+## Dataset Setup 
+1. instances.zip is in Hugging Face: https://huggingface.co/datasets/skadio/forge
+2. Use data/hf_to_local.py to download and unzip instances to a local instances/ folder 
+3. Keep instances/ and git_forge/ folders in the sameparent directory
+4. If instances are inside git_forge/ it slows down IDE indexing and searching
+
+## Steps
+1. Generate mip_to_mipinfo.pkl from MIP instances.
+   1. Select which dataset to use in input_mip_instances_file
+   2. Decide whether to use --relexation_list 0.05 0.01
+   3. Num workers can be adjusted based on CPU cores and RAM
+   4. This generates the output_mip_to_mipinfo_pkl
+   5. Be careful about memory usage when using many workers and many MIP instances (500+)
+   ```
+   python -m scripts.mip_to_mipinfo 
+   --train_config_yaml ./forge/configs/train_config.yaml 
+   --input_mip_folder ../instances/ 
+   --input_mip_instances_file ./data/configs/iclr_pretrain_clusters.txt
+   --output_mip_to_mipinfo_pkl ./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl 
+   --num_parallel_workers 4
+   ```
+2. Move output_mip_to_mipinfo_pkl to Modal "models" volume using:
+   1. Move to HF first using local_to_hf.py
+   2. Then download to Modal models volume using hf_to_modal.py
+   3. Need to use HF as intermary storage for moving large files to Modal
+   4. local_to_modal.py will fail for large files/
+3. Pre-train Forge embeddings using output_mip_to_mipinfo_pkl
+4. Generate mip_to_embeddings.pkl using the pre-trained Forge model
+
 ## Generate MIP Info
 
 ```python
