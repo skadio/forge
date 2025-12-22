@@ -230,9 +230,14 @@ def mip_to_embeddings(forge: Forge,
         Path to a single MIP file,
         A single gurobipy model instance,
         Or a list/tuple mixing these types.
+    input_mip_instances_file: Optional[str]
+        The file containing the list of MIP instances to process from input_mips.
     output_mip_to_embeddings_pkl : str
         Filepath where the resulting mapping from MIP identifiers to embeddings
         will be saved (pickle).
+    instance_embedding_only: bool
+        If true, only generate and save the instance-level embedding. Takes less space/memory.
+        Skip variable and constraint-level embeddings. Requires considerable memory to store all.
 
     Returns
     -------
@@ -281,8 +286,7 @@ def mip_to_embeddings(forge: Forge,
 
         # Inference without building grads
         # Convert MIP to vector representation
-        with torch.no_grad():
-            mip_embeddings = forge._mip_model_to_embeddings(mip_model, instance_embedding_only)
+        mip_embeddings = forge._mip_model_to_embeddings(mip_model, instance_embedding_only)
 
         # Move all tensors in the returned embeddings to CPU and detach
         for name, val in vars(mip_embeddings).items():
@@ -296,10 +300,10 @@ def mip_to_embeddings(forge: Forge,
 
         # Cleanup large refs
         del mip_embeddings
-        if not isinstance(mip_item, gp.Model): # don't delete user-provided models
+        if not isinstance(mip_item, gp.Model): # don't delete a user-provided model
             del mip_model
 
-         # Periodic cleanup to avoid fragmentation (adjust frequency as needed)
+         # Periodic cleanup to avoid fragmentation
         if idx % 50 == 0:
             gc.collect()
             torch.cuda.empty_cache()

@@ -63,13 +63,106 @@ class EdgeWeightedSAGEConv(MessagePassing):
         return aggr_out + self.lin_root(x_root)
 
 
-def blockwise_loss(quantized_one: torch.Tensor,
-                   quantized_two: torch.Tensor,
+def blockwise_loss(quantized_edge_1: torch.Tensor,
+                   quantized_edge_2: torch.Tensor,
                    target_adj_cpu: torch.Tensor,
                    num_cons: int,
                    lambda_edge: float = 1.0,
                    batch_size: int = 1024) -> torch.Tensor:
+    """Blockwise edge reconstruction loss on the bipartite submatrix.
 
+    This computes the loss only on the bipartite portion of the adjacency
+    matrix (rows ``num_cons:`` and columns ``:num_cons``), in small row
+    blocks to keep GPU memory usage bounded.
+
+    Parameters
+    ----------
+    self : nn.Module
+        Module that owns ``device`` attribute (e.g., ``Forge``).
+    quantized_edge_1 : torch.Tensor
+        First decoded edge factor matrix of shape ``(N, d)``.
+    quantized_edge_2 : torch.Tensor
+        Second decoded edge factor matrix of shape ``(N, d)``.
+    target_adj_cpu : torch.Tensor
+        Dense adjacency matrix on CPU of shape ``(N, N)``.
+    num_cons : int
+        Number of constraint nodes; the bipartite block is
+        ``rows[num_cons:, :]`` and ``cols[:num_cons]``.
+    lambda_edge : float, optional
+        Weighting factor for edge reconstruction loss.
+    batch_size : int, optional
+        Number of variable rows to process per block.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar tensor with edge reconstruction loss (including positive-edge
+        emphasis), suitable for backpropagation.
+    """
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    N = quantized_edge_1.size(0)
+
+    # Running sums (kept as tensors for autograd)
+    sum_sq = torch.zeros((), device=device)
+    sum_sq_pos = torch.zeros((), device=device)
+    count_all = 0
+
+    # Potential TODO? 
+    # Ideally, only reconstruct either the top right or bottom left 
+    # quadrant of the bipartite adjacency block. (Look at _get_edge_index_weight in processor.py)
+    # Top right is of shape adj[:num_cons, num_cons:]
+
+    for start in range(0, N, batch_size):
+        end = min(start + batch_size, N)
+
+        # Batch × d, move to device
+        block_one = quantized_edge_1[start:end, :].to(device)
+        recon_block = block_one @ block_one.T
+
+        block_two = quantized_edge_2[start:end, :].to(device)
+        recon_block_two = block_two @ block_two.T
+
+        # Merge both reconstructions
+        recon_block = recon_block @ recon_block_two.T
+
+        # Min-max rescaling per block to [0, 1]
+        block_min = recon_block.min()
+        block_max = recon_block.max()
+        recon_block = (recon_block - block_min) / (block_max - block_min + 1e-8)
+
+        # Target slice: match the local [B, B] block we reconstructed
+        tgt_block = target_adj_cpu[start:end, start:end].to(device)
+
+        # Squared error
+        diff = tgt_block - recon_block
+        sq = diff.pow(2)
+
+        # Mask for positive edges (adjacency > 0)
+        edge_scale = (tgt_block > 0).to(recon_block.dtype)
+        sq_pos = sq * edge_scale
+
+        sum_sq = sum_sq + sq.sum()
+        sum_sq_pos = sum_sq_pos + sq_pos.sum()
+        count_all += sq.numel()
+
+    if count_all == 0:
+        # No bipartite entries; return zero loss tensor on correct device
+        return torch.zeros((), device=device)
+
+    mse = sum_sq / count_all
+    pos_mean = sum_sq_pos / count_all
+
+    # Match structure of original loss:
+    return lambda_edge * (torch.sqrt(mse) + pos_mean)
+
+
+def faster_blockwise_loss(quantized_one: torch.Tensor,
+                          quantized_two: torch.Tensor,
+                          target_adj_cpu: torch.Tensor,
+                          num_cons: int,
+                          lambda_edge: float = 1.0,
+                          batch_size: int = 1024) -> torch.Tensor:
     # old_blockwise_loss
     #   - re-maps every slice with .to(device) even when already on GPU,
     #   creating many temporary allocations and fragmenting memory.
@@ -126,99 +219,4 @@ def blockwise_loss(quantized_one: torch.Tensor,
 
     mse = sum_sq / count_all
     pos_mean = sum_sq_pos / count_all
-    return lambda_edge * (torch.sqrt(mse) + pos_mean)
-
-
-def old_blockwise_loss(quantized_edge_1: torch.Tensor,
-                   quantized_edge_2: torch.Tensor,
-                   target_adj_cpu: torch.Tensor,
-                   num_cons: int,
-                   lambda_edge: float = 1.0,
-                   batch_size: int = 1024) -> torch.Tensor:
-    """Blockwise edge reconstruction loss on the bipartite submatrix.
-
-    This computes the loss only on the bipartite portion of the adjacency
-    matrix (rows ``num_cons:`` and columns ``:num_cons``), in small row
-    blocks to keep GPU memory usage bounded.
-
-    Parameters
-    ----------
-    self : nn.Module
-        Module that owns ``device`` attribute (e.g., ``Forge``).
-    quantized_edge_1 : torch.Tensor
-        First decoded edge factor matrix of shape ``(N, d)``.
-    quantized_edge_2 : torch.Tensor
-        Second decoded edge factor matrix of shape ``(N, d)``.
-    target_adj_cpu : torch.Tensor
-        Dense adjacency matrix on CPU of shape ``(N, N)``.
-    num_cons : int
-        Number of constraint nodes; the bipartite block is
-        ``rows[num_cons:, :]`` and ``cols[:num_cons]``.
-    lambda_edge : float, optional
-        Weighting factor for edge reconstruction loss.
-    batch_size : int, optional
-        Number of variable rows to process per block.
-
-    Returns
-    -------
-    torch.Tensor
-        Scalar tensor with edge reconstruction loss (including positive-edge
-        emphasis), suitable for backpropagation.
-    """
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    N = quantized_edge_1.size(0)
-
-    # Running sums (kept as tensors for autograd)
-    sum_sq = torch.zeros((), device=device)
-    sum_sq_pos = torch.zeros((), device=device)
-    count_all = 0
-
-    # Potential TODO? 
-    # Ideally, only reconstruct either the top right or bottom left 
-    # quadrant of the bipartite adjacency block. (Look at _get_edge_index_weight in processor.py)
-    # Top right is of shape adj[:num_cons, num_cons:]
-
-
-    for start in range(0, N, batch_size):
-        end = min(start + batch_size, N)
-
-        # Batch × d, move to device
-        block_one = quantized_edge_1[start:end, :].to(device)
-        recon_block = block_one @ block_one.T
-
-        block_two = quantized_edge_2[start:end, :].to(device)
-        recon_block_two = block_two @ block_two.T
-
-        # Merge both reconstructions
-        recon_block = recon_block @ recon_block_two.T
-
-        # Min-max rescaling per block to [0, 1]
-        block_min = recon_block.min()
-        block_max = recon_block.max()
-        recon_block = (recon_block - block_min) / (block_max - block_min + 1e-8)
-
-        # Target slice: match the local [B, B] block we reconstructed
-        tgt_block = target_adj_cpu[start:end, start:end].to(device)
-
-        # Squared error
-        diff = tgt_block - recon_block
-        sq = diff.pow(2)
-
-        # Mask for positive edges (adjacency > 0)
-        edge_scale = (tgt_block > 0).to(recon_block.dtype)
-        sq_pos = sq * edge_scale
-
-        sum_sq = sum_sq + sq.sum()
-        sum_sq_pos = sum_sq_pos + sq_pos.sum()
-        count_all += sq.numel()
-
-    if count_all == 0:
-        # No bipartite entries; return zero loss tensor on correct device
-        return torch.zeros((), device=device)
-
-    mse = sum_sq / count_all
-    pos_mean = sum_sq_pos / count_all
-
-    # Match structure of original loss:
     return lambda_edge * (torch.sqrt(mse) + pos_mean)

@@ -238,7 +238,7 @@ class MIPProcessor:
         try:
             mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
         except Exception as e:
-            print(f"Warning: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
+            print(f"Error: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
             return None
 
         mipinfo.instance_name = mip_file
@@ -275,7 +275,7 @@ class MIPProcessor:
                 try:
                     mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model_relaxed)
                 except Exception as e:
-                    print(f"Warning: Failed to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
+                    print(f"Error: Failed to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
                     continue
 
                 # Generate relaxation name. Handle double extensions ".lp.gz" etc.

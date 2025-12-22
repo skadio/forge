@@ -266,7 +266,7 @@ class Forge(nn.Module):
             In this codebase `edge_weight` is used for adjacency reconstruction / loss, not in `SAGEConv`.
             PyG `SAGEConv` does not consume `edge_weight`; Use a weighted convolution layer if message passing
             should be coefficient-aware.
-        dj_gpu : Optional[torch.Tensor], default=None
+        adj_gpu : Optional[torch.Tensor], default=None
             Pre-computed adjacency matrix on GPU of shape (num_nodes, num_nodes).
             When provided and not in eval mode, this matrix is used directly for edge reconstruction loss,
             avoiding repeated CPU construction.
@@ -464,7 +464,8 @@ class Forge(nn.Module):
         """
 
         # Put module into training mode (use super to avoid recursion) and move to device
-        # .train() retains dropout and batchnorm behavior vs. .eval() for inference remove dropout and freeze batchnorm
+        # .train() retains dropout and batchnorm behavior
+        # whereas .eval() for inference remove dropout and freeze batchnorm
         super().train()
         self.to(self.device)
 
@@ -641,7 +642,8 @@ class Forge(nn.Module):
         mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
 
         # Forward pass through trained Forge
-        h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+        with torch.no_grad():
+            h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
                                                                 mipinfo.num_cons, mipinfo.num_vars,
                                                                 mipinfo.edge_index.to(self.device),
                                                                 mipinfo.edge_weight.to(self.device))
@@ -654,6 +656,7 @@ class Forge(nn.Module):
         # for c in assigned_codes:
         #     instance_embedding[c] += 1
         instance_embedding = np.bincount(assigned_codes, minlength=self.codebook_size).astype(float)
+
         if instance_embedding_only:
             return MIPEmbeddings(instance_embedding=instance_embedding,
                                  embedding_of_constraint=None,
