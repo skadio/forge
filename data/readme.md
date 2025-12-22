@@ -59,23 +59,23 @@ The ICLR'26 paper experiments are denoted with prefix `iclr_`:
  
 # iclr_test_clusters.txt
 1000 DMIPLIB instances, 50 each, from: 
-CA-easy
-CA-medium
-CA-very-hard
-CA-very-hard2
-GISP-easy
-GISP-medium
-GISP-hard
-GISP-very-hard
-IP-very-hard
-MIS-easy
-MIS-medium
-MIS-very-hard
-MVC-easy
-MVC-medium
-MVC-hard
-MVC-very-hard
-SC-easy
-SC-medium
-SC-hard
-SC-very-hard
+* CA-easy
+* CA-medium
+* CA-very-hard
+* CA-very-hard2
+* GISP-easy
+* GISP-medium
+* GISP-hard
+* GISP-very-hard
+* IP-very-hard
+* MIS-easy
+* MIS-medium
+* MIS-very-hard
+* MVC-easy
+* MVC-medium
+* MVC-hard
+* MVC-very-hard
+* SC-easy
+* SC-medium
+* SC-hard
+* SC-very-hard
