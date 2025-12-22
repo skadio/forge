@@ -408,7 +408,8 @@ def mip_to_mipinfo(forge: Forge,
                    input_mip_instances_file: Optional[str],
                    output_mip_to_mipinfo_pkl: str,
                    relaxation_list: Optional[List[float]] = None,
-                   num_parallel_workers: int = 1) -> Dict[str, MIPInfo]:
+                   num_parallel_workers: int = 1,
+                   has_return: bool = True) -> Dict[str, MIPInfo]:
     """Pre-train a Forge model.
 
     You can either:
@@ -431,6 +432,8 @@ def mip_to_mipinfo(forge: Forge,
         Sequence of relaxation values to apply to MIP instance to generate relaxed instances.
     num_parallel_workers: int
         The number of parallel worker processes to use for conversion.
+    has_return: bool
+        Whether to return the generated mip_to_mipinfo mapping.
 
     Raises
     ------
@@ -470,8 +473,10 @@ def mip_to_mipinfo(forge: Forge,
     mip_to_mipinfo = mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
                                                           input_mip_instances_file=input_mip_instances_file,
                                                           output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
-                                                          relaxation_list=relaxation_list, is_save_relaxed=True,
-                                                          num_parallel_workers=num_parallel_workers, has_return=True)
+                                                          relaxation_list=relaxation_list,
+                                                          is_save_relaxed=True,
+                                                          num_parallel_workers=num_parallel_workers,
+                                                          has_return=has_return)
     return mip_to_mipinfo
 
 

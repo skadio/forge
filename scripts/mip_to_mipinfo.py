@@ -12,7 +12,8 @@ if __name__ == "__main__":
                         help='Directory containing input MIP instance files')
     parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='../models/iclr_pretrain_clusters_mip_to_mipinfo.pkl',
+    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str,
+                        default='../models/iclr_pretrain_clusters_mip_to_mipinfo.pkl',
                         help='Output path for the mip_to_mipinfo pickle')
     parser.add_argument('--relaxation_list', nargs='*', type=float, default=[0.05, 0.01],
                         help='Space-separated list of relaxation values to use during pretraining')
@@ -29,4 +30,5 @@ if __name__ == "__main__":
                                          input_mip_instances_file=args.input_mip_instances_file,
                                          output_mip_to_mipinfo_pkl=args.output_mip_to_mipinfo_pkl,
                                          relaxation_list=args.relaxation_list,
-                                         num_parallel_workers=args.num_parallel_workers)
+                                         num_parallel_workers=args.num_parallel_workers,
+                                         has_return=False)
