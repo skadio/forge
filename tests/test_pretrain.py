@@ -4,19 +4,35 @@ from tests.test_base import BaseTest
 
 from forge.utils import Constants
 
+
 class PretrainTest(BaseTest):
 
     def test_pretrain(self):
-
         # Forge model
         forge = Forge(train_config_yaml=Constants.default_train_config_yaml)
 
         # Pretrain forge
         pretrain(forge,
-                 input_mip_folder=Constants.DATA_TEST_DIR,
+                 input_mip_folder=Constants.DATA_TEST_INSTANCE_DIR,
+                 input_mip_instances_file=Constants.default_instances_unit_test_txt,
                  relaxation_list=[0.05, 0.01],
                  output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
                  output_forge_pretrained_pkl=Constants.default_forge_pretrained_pkl,
-                 output_log_file=Constants.default_forge_log_file)
+                 output_log_file=Constants.default_forge_log_file,
+                 epochs=1,
+                 steps_per_instance=1)
 
-        self.assertEqual(True, True)
+    def test_pretrain_with_mipinfo(self):
+        # Forge model
+        forge = Forge(train_config_yaml=Constants.default_train_config_yaml)
+
+        # Pretrain forge
+        pretrain(forge,
+                 input_mip_folder=Constants.DATA_TEST_INSTANCE_DIR,
+                 input_mip_instances_file=Constants.default_instances_unit_test_txt,
+                 output_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
+                 input_mip_to_mipinfo_pkl=Constants.default_mip_to_mipinfo_pkl,
+                 output_forge_pretrained_pkl=Constants.default_forge_pretrained_pkl,
+                 output_log_file=Constants.default_forge_log_file,
+                 epochs=1,
+                 steps_per_instance=1)

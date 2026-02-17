@@ -7,15 +7,17 @@ if __name__ == "__main__":
 
     # Parameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_config_yaml', type=str, default='/forge/configs/train_config.yaml',
+    parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_mip_folder', type=str, default='/data/train/',
+    parser.add_argument('--input_mip_folder', type=str, default='../data/instances/',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='/models/mip_to_mipinfo.pkl',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
+                        help='Directory containing input MIP instance files')
+    parser.add_argument('--output_mip_to_mipinfo_pkl', type=str, default='../models/iclr_pretrain_clusters_mip_to_mipinfo.pkl',
                         help='Output path for the mip_to_mipinfo pickle')
-    parser.add_argument('--output_forge_pretrained_pkl', type=str, default='/models/forge_pretrained.pkl',
+    parser.add_argument('--output_forge_pretrained_pkl', type=str, default='../models/forge_pretrained.pkl',
                         help='Output path for the pretrained Forge pickle')
-    parser.add_argument('--output_log_file', type=str, default='/models/forge_pretrained.log',
+    parser.add_argument('--output_log_file', type=str, default='../models/forge_pretrained.log',
                         help='Path to write the pretraining log')
     parser.add_argument('--input_mip_to_mipinfo_pkl', type=str, default=None,
                         help='Optional path to an existing mip_to_mipinfo pickle to load instead of generating it')
@@ -30,7 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for the optimizer')
     parser.add_argument('--max_graph_nodes', type=int, default=2100,
-                        help='Maximum number of graph nodes when converting MIP instances to DGL graphs')
+                        help='Maximum number of graph nodes when converting MIP instances to bipartite graph')
     args = parser.parse_args()
 
     # Create Forge with training configuration
@@ -39,6 +41,7 @@ if __name__ == "__main__":
     # Pre-train Forge
     pretrain(forge=forge,
              input_mip_folder=args.input_mip_folder,
+             input_mip_instances_file=args.input_mip_instances_file,
              output_mip_to_mipinfo_pkl=args.output_mip_to_mipinfo_pkl,
              output_forge_pretrained_pkl=args.output_forge_pretrained_pkl,
              output_log_file=args.output_log_file,

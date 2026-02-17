@@ -24,11 +24,15 @@ decoder_edge_dim: 32
 # Vector Quantization Parameters
 vq_decay: 0.8
 vq_commitment_weight: 0.25
-vq_is_cosine_sim: true
+vq_is_cosine_sim: false
 
 # Training Parameters
 epochs: 10
 steps_per_instance: 10
 learning_rate: 1e-4
 weight_decay: 1e-4
-max_graph_nodes: 2100
+max_graph_nodes: 100000
+adj_block_size: 5120
+
+# Integral Gap
+integral_gap_safety_eps: 0.05

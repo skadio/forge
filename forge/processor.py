@@ -14,10 +14,9 @@ Notes
 - Many helper functions assume Gurobi model APIs such as getVars, getConstrs and getA.
 """
 import os
-import time
-from typing import List, Any, Dict, Optional, Union
+import warnings
+from typing import List, Dict, Optional, Union
 
-# import dgl
 import gurobipy as gp
 import numpy as np
 import scipy.sparse as sp
@@ -26,6 +25,8 @@ import yaml
 from tqdm import tqdm
 
 from forge.utils import check_true, Constants, overwrite_if_given, save_pickle, load_pickle
+from multiprocessing import get_context
+from functools import partial
 
 
 class MIPInfo:
@@ -49,25 +50,23 @@ class MIPInfo:
         Edge weights tensor of shape (num_edges,) corresponding to edges in `edge_index`.
     """
 
-    def __init__(self,
-                 instance_name: str = None,
-                 feature_tensor: Optional[torch.Tensor] = None,
+    def __init__(self, instance_name: str = None,
                  num_cons: int = None,
                  num_vars: int = None,
+                 feature_tensor: Optional[torch.Tensor] = None,
                  edge_index: Optional[torch.Tensor] = None,
                  edge_weight: Optional[torch.Tensor] = None):
-
         self.instance_name: Optional[str] = instance_name
-        # self.dgl_graph: Optional[dgl.DGLGraph] = dgl_graph
 
         # feature_tensor shape: (num_cons + num_vars, feat_dim=10)
         self.feature_tensor: Optional[torch.Tensor] = feature_tensor
         self.num_cons: Optional[int] = num_cons
         self.num_vars: Optional[int] = num_vars
-        # TODO: double-check sizes and index (constraint or var)
+
         # - `edge_index`: PyG  COO`(2, E)`
         #   connectivity from source (constraint) to target (variable) nodes where there is an Edge
         self.edge_index: Optional[torch.Tensor] = edge_index
+
         # - `edge_weight`: per-edge normalized coefficient values (FloatTensor of length `E`).
         self.edge_weight: Optional[torch.Tensor] = edge_weight
 
@@ -102,8 +101,8 @@ class MIPEmbeddings:
         embedding_of_variable : Optional[torch.Tensor], default: None
             Embedding vector per variable.
         """
-        self.instance_embedding: Optional[np.ndarray]= instance_embedding
-        self.embedding_of_constraint: Optional[torch.Tensor]= embedding_of_constraint
+        self.instance_embedding: Optional[np.ndarray] = instance_embedding
+        self.embedding_of_constraint: Optional[torch.Tensor] = embedding_of_constraint
         self.embedding_of_variable: Optional[torch.Tensor] = embedding_of_variable
 
 
@@ -144,9 +143,11 @@ class MIPProcessor:
 
     def convert_mip_to_mipinfo(self,
                                input_mip_folder: str,
+                               input_mip_instances_file: Optional[str],
                                output_mip_to_mipinfo_pkl: str,
                                relaxation_list: Optional[List[float]] = None,
                                is_save_relaxed: bool = False,
+                               num_parallel_workers: int = 1,
                                has_return: bool = False) -> Optional[Dict[str, MIPInfo]]:
         """
         Converts MIP instances in a given folder to MIPInfo objects and saves them to a pickle file.
@@ -155,6 +156,8 @@ class MIPProcessor:
         ----------
         input_mip_folder : str
             Path to the directory containing MIP instance files (`.mps` or `.lp`).
+        input_mip_instances_file : str
+            If provided, only MIP instances listed in this file (one per line) will be processed.
         output_mip_to_mipinfo_pkl : str
             Path where the resulting pickled mapping of instance names to `MIPInfo` objects will be saved.
         relaxation_list : Optional[List[float]], default: None
@@ -163,6 +166,8 @@ class MIPProcessor:
             Only one relaxed instance is created per ratio in the list.
         is_save_relaxed : bool, default: False
             If True, relaxed MIP instances are written to disk using the original name, plus the relaxation ratio.
+        num_parallel_workers : int, default: 1
+            Number of parallel worker processes to use for conversion.
         has_return : bool, default: False
             If True the function returns the dictionary mapping instance names to `MIPInfo`,
             otherwise it returns None after saving to `output_file`.
@@ -170,96 +175,153 @@ class MIPProcessor:
         Returns
         -------
         Optional[Dict[str, List[Any]]]
-            The dictionary mapping instance file paths (or relaxed names) to `MIPInfo` when `has_return` is True;
+            Dict mapping instance file paths (or relaxed names) to `MIPInfo` when `has_return` is True;
             Otherwise None.
         """
 
         if relaxation_list is None:
             relaxation_list = []
 
+        # Normalize worker count
+        if not num_parallel_workers or num_parallel_workers < 1:
+            num_parallel_workers = 1
+
         # Find and sort MIP instance files by size
-        sorted_mip_files = MIPProcessor.get_only_mip_files(input_mip_folder, is_sort_by_size=True)
+        sorted_mip_files = _MIPUtils.get_only_mip_files(input_mip_folder, input_mip_instances_file,
+                                                        is_sort_by_size=True)
 
-        # Start Gurobi environment
-        gurobi_env = MIPProcessor._start_gurobi_env()
-
-        # Convert each MIP instance to MIPInfo object and store in dictionary
         mip_to_mipinfo = {}
-        for idx in tqdm(range(len(sorted_mip_files))):
 
-            # Read MIP file to a Gurobi model
-            mip_model = gp.read(sorted_mip_files[idx], env=gurobi_env)
+        # Sequential path when using a single worker
+        if num_parallel_workers == 1:
+            # Start Gurobi environment
+            gurobi_env = _MIPUtils.start_gurobi_env()
 
-            # Generate MIPInfo object from Gurobi model, set name, and add to dictionary
-            mipinfo = self._mip_model_to_mipinfo(mip_model)
-            mipinfo.instance_name = sorted_mip_files[idx]
-            mip_to_mipinfo[mipinfo.instance_name] = mipinfo
+            # Convert each MIP instance to MIPInfo object and store in dictionary
+            for idx in tqdm(range(len(sorted_mip_files))):
+                
+                # Create a local dictionary for this instance (and its relaxations)
+                idx_to_mipinfo_dict = MIPProcessor._mip_file_to_mipinfo_dict(sorted_mip_files[idx], gurobi_env,
+                                                                             self.rng, relaxation_list, is_save_relaxed)
+                # Add mipinfo dict to the global dictionary
+                if idx_to_mipinfo_dict:
+                    mip_to_mipinfo.update(idx_to_mipinfo_dict)
 
-            if relaxation_list:
-                for ratio in relaxation_list:
+            # Close Gurobi environment
+            gurobi_env.close()
+        else:
+            # Parallel path using multiprocessing with the requested number of workers
+            ctx = get_context("spawn")
+            with ctx.Pool(processes=num_parallel_workers) as pool:
+                worker = partial(MIPProcessor._run_mipinfo_worker,
+                                 is_save_relaxed=is_save_relaxed,
+                                 relaxation_list=relaxation_list,
+                                 rng=self.rng)
 
-                    # Create a copy of the original model to remove constraints from
-                    mip_model_relaxed = mip_model.copy()
-                    cons = mip_model_relaxed.getConstrs()
-
-                    # Choose a random number of constraints within the ratio to remove
-                    k = int(len(cons) * ratio)
-                    if k <= 0:
-                        continue
-
-                    # Choose a random subset of constraints
-                    cons_remove_ = self.rng.choice(cons, k, replace=False)
-
-                    # Remove them from the copy model
-                    for c in cons_remove_:
-                        mip_model_relaxed.remove(c)
-                    mip_model_relaxed.update()
-
-                    # Generate MIPInfo object from relaxed model, set name, and add to dictionary
-                    mipinfo = self._mip_model_to_mipinfo(mip_model_relaxed)
-                    orig_path = sorted_mip_files[idx]
-                    base, ext = os.path.splitext(orig_path)
-                    mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
-                    mip_to_mipinfo[mipinfo.instance_name] = mipinfo
-
-                    # Save the perturbed MIP instance to disk
-                    if is_save_relaxed:
-                        mip_model_relaxed.write(mipinfo.instance_name)
-
-                    # Release copy model
-                    mip_model_relaxed.dispose()
-
-        # Close Gurobi environment
-        gurobi_env.close()
+                for result in tqdm(pool.imap_unordered(worker, sorted_mip_files), total=len(sorted_mip_files)):
+                    if result:
+                        mip_to_mipinfo.update(result)
 
         save_pickle(mip_to_mipinfo, output_mip_to_mipinfo_pkl)
 
         return mip_to_mipinfo if has_return else None
 
     @staticmethod
-    def load_mipinfo_from_pickles(mip_to_mipinfo_files: List[str]) -> List[MIPInfo]:
-        """
-        Load and aggregate lists of MIPInfo objects from multiple pickled files.
+    def _mip_file_to_mipinfo_dict(mip_file: str, gurobi_env, rng,
+                                  relaxation_list: List[float], is_save_relaxed: bool) -> Optional[Dict[str, MIPInfo]]:
+        
+        print("<< Start: Convert to mipinfo:", mip_file)
+        
+        mip_to_mipinfo_local: Dict[str, MIPInfo] = {}
 
-        Parameters
-        ----------
-        mip_to_mipinfo_files : List[str]
-            List of paths to pickled mappings (saved by `convert_mip_to_mipinfo`).
+        # Read MIP file to a Gurobi model
+        mip_model = gp.read(mip_file, env=gurobi_env)
 
-        Returns
-        -------
-        List[MIPInfo]
-            Flattened list of `MIPInfo` objects.
-        """
-        mipinfo_list = []
-        for mip_to_mipinfo_file in mip_to_mipinfo_files:
-            mip_to_mipinfo = load_pickle(mip_to_mipinfo_file)
-            for mip in mip_to_mipinfo:
-                mipinfo_list.append(mip_to_mipinfo[mip])
-        return mipinfo_list
+        # Generate MIPInfo object from original model, set name, and add to dictionary
+        # Catch numeric issues during conversion in feature normalization
+        try:
+            # Convert NumPy invalid-value operations into FloatingPointError
+            with np.errstate(invalid='raise'):
+                # Turn RuntimeWarning into an exception for this call
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", category=RuntimeWarning)
+                    mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+        except (FloatingPointError, RuntimeWarning) as e:
+            print(f"Error: Numeric Issue to convert MIP {mip_file} to MIPInfo due to error: {e}")
+            return None
+        except Exception as e:
+            print(f"Error: Failed to convert MIP {mip_file} to MIPInfo due to error: {e}")
+            return None
+
+        mipinfo.instance_name = mip_file
+        mip_to_mipinfo_local[mipinfo.instance_name] = mipinfo
+
+        if relaxation_list:
+            for ratio in relaxation_list:
+
+                # Create a copy of the original model to remove constraints from
+                mip_model_relaxed = mip_model.copy()
+                cons = mip_model_relaxed.getConstrs()
+
+                # Choose a random number of constraints within the ratio to remove
+                k = int(len(cons) * ratio)
+                if k <= 0:
+                    continue
+
+                # Removing constraints might lead to an exception, repeat until success
+                success = False
+                while not success:
+                    try:
+                        # Choose a random subset of constraints
+                        cons_remove_ = rng.choice(cons, k, replace=False)
+
+                        # Remove them from the copy model
+                        for c in cons_remove_:
+                            mip_model_relaxed.remove(c)
+                        mip_model_relaxed.update()
+                        success = True
+                    except Exception as e:
+                        print(f"Retrying due to exception: {e}")
+
+                # Generate MIPInfo object from relaxed model, set name, and add to dictionary
+                # Catch numeric issues during conversion in feature normalization
+                try:
+                    # Convert NumPy invalid-value operations into FloatingPointError
+                    with np.errstate(invalid='raise'):
+                        # Turn RuntimeWarning into an exception for this call
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("error", category=RuntimeWarning)
+                            mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+                except (FloatingPointError, RuntimeWarning) as e:
+                    print(f"Error: Numeric Issue to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
+                    continue
+                except Exception as e:
+                    print(f"Error: Failed to convert RELAXED MIP {mip_file} to MIPInfo due to error: {e}")
+                    continue
+
+                # Generate relaxation name. Handle double extensions ".lp.gz" etc.
+                base, ext = os.path.splitext(mip_file)
+                if ext == ".gz":
+                    base2, ext2 = os.path.splitext(base)
+                    mipinfo.instance_name = f"{base2}_relaxed_{ratio}{ext2}{ext}"
+                else:
+                    mipinfo.instance_name = f"{base}_relaxed_{ratio}{ext}"
+
+                # Store mipinfo
+                mip_to_mipinfo_local[mipinfo.instance_name] = mipinfo
+
+                # Save the perturbed MIP instance to disk
+                if is_save_relaxed:
+                    mip_model_relaxed.write(mipinfo.instance_name)
+
+                # Release copy model
+                mip_model_relaxed.dispose()
+
+        print(">> Finish: Convert to mipinfo:", mip_file)
+        return mip_to_mipinfo_local
 
     @staticmethod
-    def _mip_model_to_mipinfo(mip_model: gp.Model, is_debug: bool = False) -> Union[bool, MIPInfo]:
+    def _mip_model_to_mipinfo(mip_model: gp.Model) -> MIPInfo:
         """
         Convert a Gurobi model into a MIPInfo.
 
@@ -273,44 +335,67 @@ class MIPProcessor:
         Parameters
         ----------
         mip_model : gp.Model
-            The Gurobi model to convert. The function will mutate the model (remove zero-columns)
-            to ensure a valid bipartite incidence.
-        is_debug : bool
-            If True, prints timing/debug information.
+            The Gurobi model to convert.
+            The function will mutate the model (remove zero-columns) to ensure a valid bipartite incidence.
 
         Returns
         -------
-        Union[bool, MIPInfo]
-            Returns False on irrecoverable failure, an empty MIPInfo on soft failure,
-            or a populated MIPInfo on success.
+        MIPInfo
+            On success, MIPInfo.
+            On failure, propagates errors to the caller.
         """
 
         # Remove zero-column variables (vars with no coefficients) to ensure valid bipartite graph
+        # This might error on relaxed instances e.g; MIPLIB_train_supportcase27i.mps.gz
         to_remove = [v for v in mip_model.getVars() if not mip_model.getCol(v).size()]
         mip_model.remove(to_remove)
         mip_model.update()
-
-        s = 0
-        if is_debug:
-            print("Compute Feature Tensor")
-            s = time.time()
 
         # Get static feature tensor from MIP, number of constraints, and number of variables
         # Feature tensor shape: (num_cons + num_vars, feat_dim=10)
         feature_tensor, num_cons, num_vars = MIPProcessor._get_feature_tensor_num_cons_num_vars(mip_model)
 
-        if is_debug:
-            print("Feature Tensor Computed in ", time.time() - s, "seconds")
-            print("Creating PyG edge tensors")
-            s = time.time()
-
         # Get edge indexes and weights in Tensor, ready for PyG
         edge_index, edge_weight = MIPProcessor._get_edge_index_weight(mip_model, num_cons, num_vars)
-        # edge_index, edge_weight = MIPProcessor._old_get_edge_index_weight(mip_model, num_cons, num_vars, is_debug)
 
-        return MIPInfo(feature_tensor=feature_tensor,
-                       num_cons=num_cons, num_vars=num_vars,
+        return MIPInfo(num_cons=num_cons, num_vars=num_vars, feature_tensor=feature_tensor,
                        edge_index=edge_index, edge_weight=edge_weight)
+
+    @staticmethod
+    def _run_mipinfo_worker(mip_file: str,
+                            is_save_relaxed: bool,
+                            relaxation_list: List[float],
+                            rng) -> Optional[Dict[str, MIPInfo]]:
+
+        """Worker function to compute MIPInfo for a single MIP instance.
+
+        This function is designed to be picklable so it can be used with multiprocessing.
+        It creates and tears down its own Gurobi environment inside each worker process.
+
+        On success, returns Dict[str, MIPInfo] for the MIP file and its relaxations.
+        On fail, returns None.
+        """
+
+        try:
+            # Start Gurobi environment and set limits for this worker
+            gurobi_env = _MIPUtils.start_gurobi_env()
+
+            # Create mipinfo dict for file and its relaxations
+            idx_to_mipinfo_dict = MIPProcessor._mip_file_to_mipinfo_dict(mip_file, gurobi_env,
+                                                                         rng, relaxation_list, is_save_relaxed)
+            gurobi_env.close()
+
+            # Return local mipinfo dict
+            return idx_to_mipinfo_dict
+
+        except Exception as exc:
+            print(f"\nError while processing {mip_file}: {exc}")
+            try:
+                # Best-effort cleanup; in some failure modes env may not exist
+                gurobi_env.close()
+            except Exception:
+                pass
+            return None
 
     @staticmethod
     def _get_feature_tensor_num_cons_num_vars(mip_model):
@@ -366,7 +451,7 @@ class MIPProcessor:
 
         # Column normalize features
         feature_matrix = (feature_matrix - np.min(feature_matrix, axis=0)) / (
-                    np.max(feature_matrix, axis=0) - np.min(feature_matrix, axis=0) + 1e-9)
+                np.max(feature_matrix, axis=0) - np.min(feature_matrix, axis=0) + 1e-9)
         feature_matrix[np.isnan(feature_matrix)] = 0
 
         # Convert features to tensor
@@ -374,74 +459,6 @@ class MIPProcessor:
 
         # Return feature tensor, number of constraints, and number of variables
         return feature_tensor, num_cons, num_vars
-
-    @staticmethod
-    def _start_gurobi_env():
-        """
-        Initialize, start and return a Gurobi environment with output disabled.
-
-        Returns
-        -------
-        gp.Env
-            Configured Gurobi environment.
-        """
-        try:
-            from gurobi_onboarder import init_gurobi
-            gurobi_env, GUROBI_FOUND = init_gurobi.initialize_gurobi()
-        except Exception:
-            gurobi_env = gp.Env(empty=True)
-        gurobi_env.setParam("OutputFlag", 0)
-        gurobi_env.start()
-        return gurobi_env
-
-    @staticmethod
-    def get_only_mip_files(input_mip_folder: str, is_sort_by_size:bool = False) -> List[str]:
-        """
-        Find MIP instance files in a directory and return them sorted by file size.
-
-        Parameters
-        ----------
-        input_mip_folder : str
-            Path to the directory containing MIP instance files.
-        is_sort_by_size : bool
-            If True, sorts the returned file paths by file size in ascending order/smallest first.
-
-        Returns
-        -------
-        List[str]
-            Absolute paths to files with extensions `.mps` or `.lp`, optionally sorted by file size (ascending).
-        """
-
-        all_filenames = os.listdir(input_mip_folder)
-        all_filepaths = [os.path.join(input_mip_folder, filename) for filename in all_filenames]
-        mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or p.lower().endswith('.lp')]
-
-        # Smallest sized mip first
-        if is_sort_by_size:
-            mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
-
-        return mip_filepaths
-
-    @staticmethod
-    def get_mip_items(input_mips):
-        """
-        Normalize input: accept a folder path, a single MIP file path, a list of paths,
-        or a gurobipy Model instance (or list/mix of them).
-        Returns a list of MIP items (file paths or gp.Model instances).
-        """
-        inputs = input_mips if isinstance(input_mips, (list, tuple)) else [input_mips]
-        mip_items = []
-        for item in inputs:
-            if isinstance(item, gp.Model):
-                mip_items.append(item)
-            elif isinstance(item, str) and os.path.isdir(item):
-                mip_items.extend(MIPProcessor.get_only_mip_files(item, is_sort_by_size=False))
-            elif isinstance(item, str) and os.path.isfile(item):
-                mip_items.append(item)
-            else:
-                raise ValueError(
-                    f"Error: Input {item!r} is neither a directory, a file, nor a gurobipy model instance.")
-        return mip_items
 
     @staticmethod
     def _get_edge_index_weight(mip_model, num_cons, num_vars):
@@ -472,88 +489,9 @@ class MIPProcessor:
         return edge_index, edge_weights
 
     @staticmethod
-    def _old_get_edge_index_weight(cls, mip_model, num_cons, num_vars):
-        # Get coefficient matrix (sparse) and convert to dense (constraint, variable)
-        coefficient_matrix = mip_model.getA().todense()
-
-        # Convert to binary adjacency, where any nonzero coefficient becomes `1`
-        # Edge presence between a constraint and a variable.
-        A = (coefficient_matrix != 0).astype(int)
-
-        # Create full bipartite adjacency matrix
-        # top-left and bottom-right are zero blocks (no constraint-constraint or var-var edges)
-        # the off-diagonal blocks are `A` and `A.T` (constraint-variable edges).
-        # This produces a (num_cons+num_vars) × (num_cons+num_vars) adjacency matrix.
-        adj = np.block([[np.zeros((num_cons, num_cons)), A], [A.T, np.zeros((num_vars, num_vars))]])
-
-        # Quit if adjacency is empty
-        if adj is None or getattr(adj, "size", 0) == 0:
-            return False
-
-        # adj = normalize_adj(adj)
-
-        # Convert the dense adjacency to a CSR sparse matrix and then to COO format.
-        # In COO, we can access `.row` and `.col` arrays for graph edge construction (used for `edge_index`).
-        # COO format stands for "Coordinate List" format.
-        # COO a way to represent sparse matrices by storing only the non-zero entries and their coordinates (row/col)
-        # In COO format, a sparse matrix is described by three arrays:
-        #   row indices (i)
-        #   column indices (j)
-        #   values (v)
-        # Each entry (i[k], j[k], v[k]) means that the value v[k] is at position (i[k], j[k]) in the matrix.
-        adj_sp = sp.csr_matrix(adj)
-        adj_coo = adj_sp.tocoo()
-
-        # Create PyG edge_index (shape: 2 x num_edges)
-        # COO format so we can access the nonzero coordinates via `adj_coo.row` and `adj_coo.col`.
-        # np.array(..) builds a 2×E NumPy array where the first row is source node indices
-        #   and the second row is target node indices for every nonzero entry (E = number of edges / nonzeros).
-        # torch.tensor(..., dtype=torch.long)` converts that into a PyTorch LongTensor of shape `(2, E)`
-        # This is the PyG `edge_index` format (row 0 = sources, row 1 = targets).
-        # Long dtype is required because PyG uses these tensors for indexing.
-        edge_index = torch.tensor(np.array([adj_coo.row, adj_coo.col]), dtype=torch.long)
-
-        # - np.block(...) constructs a dense block matrix with four blocks:
-        #   - top-left: zero matrix for constraint‑to‑constraint (size `num_cons x num_cons`)
-        #   - top-right: `coefficient_matrix` (constraint × variable)
-        #   - bottom-left: `coefficient_matrix.T` (variable × constraint)
-        #   - bottom-right: zero matrix for var‑to‑var (size `num_vars x num_vars`)
-        #  The resulting matrix represents the bipartite constraint_variable incidence,
-        #  But carrying the actual coefficients instead of 0/1.
-        coeff_adj = np.block([[np.zeros((num_cons, num_cons)), coefficient_matrix],
-                              [coefficient_matrix.T, np.zeros((num_vars, num_vars))]])
-        coeff_adj_sp = sp.csr_matrix(coeff_adj)
-        coeff_adj_coo = coeff_adj_sp.tocoo()
-
-        # Gather the nonzero coefficient values from the dense block matrix `coeff_adj`
-        # at the coordinate pairs given by the COO sparse representation (`coeff_adj_coo.row`, `coeff_adj_coo.col`).
-        # Result is flattened to a 1‑D NumPy array of per‑edge raw coefficients.
-        edge_weights = coeff_adj[coeff_adj_coo.row, coeff_adj_coo.col].flatten()
-
-        # Apply min–max normalization to scale the weights into \[0,1\].
-        # epsilon is added to the denominator to avoid zero division when all values are (nearly) identical.
-        edge_weights = (edge_weights - edge_weights.min()) / (edge_weights.max() - edge_weights.min() + 1e-6)
-        # Shift all weights up slightly so none are exactly zero
-        # (often useful if downstream code expects strictly positive weights).
-        edge_weights += 1e-4
-        # Convert the NumPy array into a PyTorch FloatTensor to be used as per‑edge features in PyG
-        # `edge_weight` must align with `edge_index`
-        edge_weight = torch.FloatTensor(edge_weights)
-
-        # Decommission DGL
-        # dgl_graph.ndata["feat"] = feature_tensor
-        # dgl_graph.edata["weight"] = torch.FloatTensor(edge_weights).T
-        #
-        # check_true(dgl_graph.num_nodes() == dgl_graph.ndata["feat"].shape[0],
-        #            ValueError(f"Error: graph has {dgl_graph.num_nodes()} nodes but "
-        #                       f"feature matrix has {dgl_graph.ndata['feat'].shape[0]} rows"))
-
-        return edge_index, edge_weight
-
-    @staticmethod
     def _normalize_edge_weights(edge_weights: Optional[np.ndarray],
-                               eps: float = 1e-12,
-                               small_eps: float = 1e-4) -> torch.FloatTensor:
+                                eps: float = 1e-12,
+                                small_eps: float = 1e-4) -> torch.FloatTensor:
         """
         Normalize edge weights using the small-eps-only strategy.
 
@@ -579,3 +517,116 @@ class MIPProcessor:
             out = out + small_eps
 
         return torch.FloatTensor(out)
+
+
+class _MIPUtils:
+
+    @staticmethod
+    def get_mip_items(input_mips, input_mip_instances_file):
+        """
+        Normalize input: accept a folder path, a single MIP file path, a list of paths,
+        or a gurobipy Model instance (or list/mix of them).
+        Returns a list of MIP items (file paths or gp.Model instances).
+        """
+        inputs = input_mips if isinstance(input_mips, (list, tuple)) else [input_mips]
+        mip_items = []
+        for item in inputs:
+            if isinstance(item, gp.Model):
+                mip_items.append(item)
+            elif isinstance(item, str) and os.path.isdir(item):
+                mip_items.extend(_MIPUtils.get_only_mip_files(item, input_mip_instances_file, is_sort_by_size=False))
+            elif isinstance(item, str) and os.path.isfile(item):
+                mip_items.append(item)
+            else:
+                raise ValueError(
+                    f"Error: Input {item!r} is neither a directory, a file, nor a gurobipy model instance.")
+        return mip_items
+
+    @staticmethod
+    def get_only_mip_files(input_mip_folder: str, input_mip_instances_file: str,
+                           is_sort_by_size: bool = False) -> List[str]:
+        """
+        Find MIP instance files in a directory and return them sorted by file size.
+
+        Parameters
+        ----------
+        input_mip_folder : str
+            Path to the directory containing MIP instance files.
+        input_mip_instances_file: str
+            If provided, only include instances from input_mip_folder listed in the file.
+        is_sort_by_size : bool
+            If True, sorts the returned file paths by file size in ascending order/smallest first.
+
+        Returns
+        -------
+        List[str]
+            Absolute paths to files with extensions `.mps` or `.lp`, optionally sorted by file size (ascending).
+        """
+
+        # Get full paths and filter for MIP files
+        try:
+            all_filenames = os.listdir(input_mip_folder)
+        except Exception as e:
+            raise ValueError(f"Error: cannot list directory `{'input_mip_folder'}`: {e}")
+
+        all_filepaths = [os.path.join(input_mip_folder, filename) for filename in all_filenames]
+        mip_filepaths = [p for p in all_filepaths if p.lower().endswith('.mps') or
+                         p.lower().endswith('.lp') or
+                         p.lower().endswith('.mps.gz') or
+                         p.lower().endswith('.lp.gz')]
+
+        # Filter by input_mip_instance_file, if provided
+        if input_mip_instances_file is not None:
+            try:
+                with open(input_mip_instances_file, 'r') as f:
+                    allowed_instances = set(line.strip() for line in f if line.strip())
+            except Exception as e:
+                raise ValueError(f"Error: cannot read instances file `{input_mip_instances_file}`: {e}")
+            mip_filepaths = [p for p in mip_filepaths if os.path.basename(p) in allowed_instances]
+
+        # Smallest sized mip first
+        if is_sort_by_size:
+            mip_filepaths = sorted(mip_filepaths, key=os.path.getsize)
+
+        return mip_filepaths
+
+    @staticmethod
+    def load_mipinfo_from_pickles(mip_to_mipinfo_files: List[str]) -> List[MIPInfo]:
+        """
+        Load and aggregate lists of MIPInfo objects from multiple pickled files.
+
+        Parameters
+        ----------
+        mip_to_mipinfo_files : List[str]
+            List of paths to pickled mappings (saved by `convert_mip_to_mipinfo`).
+
+        Returns
+        -------
+        List[MIPInfo]
+            Flattened list of `MIPInfo` objects.
+        """
+        mipinfo_list = []
+        for mip_to_mipinfo_file in mip_to_mipinfo_files:
+            mip_to_mipinfo = load_pickle(mip_to_mipinfo_file)
+            for mip in mip_to_mipinfo:
+                mipinfo_list.append(mip_to_mipinfo[mip])
+        return mipinfo_list
+
+    @staticmethod
+    def start_gurobi_env():
+        """
+        Initialize, start and return a Gurobi environment with output disabled.
+
+        Returns
+        -------
+        gp.Env
+            Configured Gurobi environment.
+        """
+        try:
+            from gurobi_onboarder import init_gurobi
+            gurobi_env, GUROBI_FOUND = init_gurobi.initialize_gurobi()
+        except Exception:
+            gurobi_env = gp.Env(empty=True)
+        gurobi_env.setParam("OutputFlag", 0)
+        gurobi_env.start()
+        return gurobi_env

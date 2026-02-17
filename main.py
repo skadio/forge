@@ -1,48 +1,74 @@
 import modal
 
+# Manually create `instances` volume and upload from local via cli
+# Manually create mip_to_mipinfo.pkl files and upload to HF via models/local_to_hf.py
+# Manually crate `models` volume and download from HF via models/hf_to_modal.py
+# Create: modal volume create instances
+# Create: modal volume create models
+# List: modal volume list
+# List: modal volume ls instances
+# Upload: modal volume put instances . (inside /data/instances)
+# Rename: modal volume rename data instances
+# Remove: modal volume rm instances configs -r
+instances_volume = modal.Volume.from_name("instances")
+models_volume = modal.Volume.from_name("models")
+
+# Create a modal image and install libraries
+# Copy the current folder/repo, except main.py file
 forge_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     "apt-get update",
-    "pip install numpy pandas pyyaml scikit-learn scipy",
+    "pip install gurobipy numpy huggingface-hub pandas pyyaml scikit-learn scipy",
     "pip install torch torch-geometric tqdm vector-quantize-pytorch"
-    "pip install gurobi"
-)
+).add_local_dir(".", "/root/", ignore=["./main.py",  # This will be copied when running modal on main.py
+                                       "./data/instances/", "./models",  # these will come from Volumes
+                                       "./experiments", "./tests",  # not needed
+                                       "./.gitignore", "./CHANGELOG.txt", "./LICENSE", "./MANIFEST.in",
+                                       "./pyproject.toml", "./README.md", "./.git", "./.idea", "./__pycache__",
+                                       "./data/__pycache__" "./forge/__pycache__", "./experiments/__pycache__"])
 
 # Create Modal app
-app = modal.App("forge_312", image=forge_image)
+app = modal.App("Forge-ICLR-Pretrain", image=forge_image)
 
-@app.function()
+# Nvidia B200 # $6.25 / h
+# Nvidia H200 # $4.54 / h
+# Nvidia H100 # $3.95 / h
+# Nvidia A100, 80 GB # $2.50 / h
+# Nvidia A100, 40 GB # $2.10 / h
+# Nvidia L40S # $1.95 / h
+# Nvidia A10 # $1.10 / h
+# Nvidia L4 # $0.80 / h
+# Nvidia T4 # $0.59 / h
+@app.function(volumes={"/root/data/instances": instances_volume,
+                       "/root/models/": models_volume},
+              timeout=86000,
+              gpu="H200")
 def run():
-    import gurobipy as gp
-    from gurobipy import GRB
-    m = gp.Model("mip1")
-    x = m.addVar(vtype=GRB.BINARY, name="x")
-    y = m.addVar(vtype=GRB.BINARY, name="y")
-    z = m.addVar(vtype=GRB.BINARY, name="z")
-    m.setObjective(x + y + 2 * z, GRB.MAXIMIZE)
-    m.addConstr(x + 2 * y + 3 * z <= 4, "c0")
-    m.addConstr(x + y >= 1, "c1")
-    m.optimize()
-    for v in m.getVars():
-        print(f"{v.VarName} {v.X:g}")
-    print(f"Obj: {m.ObjVal:g}")
-    return m.ObjVal
+    import os, subprocess
+    current_dir = os.getcwd()
+    # parent_dir = os.path.dirname(current_dir)
+    print("Current directory:", current_dir)
+    subprocess.run(["ls", "-al", current_dir])
 
+    from forge.embeddings import Forge
+    from forge.pipeline import pretrain
+
+    forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
+    config="iclr_forge_pretrain"
+    pretrain(forge=forge,
+             input_mip_folder="/root/data/instances/",
+             input_mip_instances_file=f"/root/data/configs/{config}.txt",
+             output_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
+             input_mip_to_mipinfo_pkl=f"/root/models/{config}_mip_to_mipinfo.pkl",
+             output_forge_pretrained_pkl=f"/root/models/{config}_trained.pkl",
+             output_log_file=f"/root/models/{config}_trained.log")
 
 # > modal run main.py
+# --detach flag to run in background, continue even terminal is closed
 @app.local_entrypoint()
 def main():
-    # run locally
-    print(run.local())
-
-    # # run remotely on Modal
-    # print(run.remote())
-
-    # # run remotely on Modal in parallel
-    # total = 0
-    # for ret in f.map(range(10)):
-    #     total += ret
-    # print(total)
-
+    # print(run.local())
+    run.remote()
 
 # Define CUDA base image tag
 # cuda_version = "12.4.1"
