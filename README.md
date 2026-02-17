@@ -4,8 +4,8 @@ Forge is a research library designed for representational learning in combinator
 ## Dataset Setup 
 1. instances.zip is in Hugging Face: https://huggingface.co/datasets/skadio/forge
 2. Use data/hf_to_local.py to download and unzip instances to a local instances/ folder 
-3. Keep instances/ and git_forge/ folders in the sameparent directory
-4. If instances are inside git_forge/ it slows down IDE indexing and searching
+3. Keep instances/ and git_forge/ folders in the same parent directory
+4. For local, if instances are inside git_forge/ it slows down IDE indexing and searching
 
 ## Steps
 1. Generate mip_to_mipinfo.pkl from MIP instances.
