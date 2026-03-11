@@ -100,7 +100,7 @@ def blockwise_loss(quantized_edge_1: torch.Tensor,
         emphasis), suitable for backpropagation.
     """
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = quantized_edge_1.device
     N = quantized_edge_1.size(0)
 
     # Running sums (kept as tensors for autograd)
@@ -116,11 +116,11 @@ def blockwise_loss(quantized_edge_1: torch.Tensor,
     for start in range(0, N, batch_size):
         end = min(start + batch_size, N)
 
-        # Batch × d, move to device
-        block_one = quantized_edge_1[start:end, :].to(device)
+        # Batch × d, move to device only if not already there
+        block_one = quantized_edge_1[start:end].to(device)
         recon_block = block_one @ block_one.T
 
-        block_two = quantized_edge_2[start:end, :].to(device)
+        block_two = quantized_edge_2[start:end].to(device)
         recon_block_two = block_two @ block_two.T
 
         # Merge both reconstructions
@@ -132,6 +132,7 @@ def blockwise_loss(quantized_edge_1: torch.Tensor,
         recon_block = (recon_block - block_min) / (block_max - block_min + 1e-8)
 
         # Target slice: match the local [B, B] block we reconstructed
+        # Keep target on CPU until needed, then move to device and delete intermediate tensors
         tgt_block = target_adj_cpu[start:end, start:end].to(device)
 
         # Squared error
@@ -140,11 +141,14 @@ def blockwise_loss(quantized_edge_1: torch.Tensor,
 
         # Mask for positive edges (adjacency > 0)
         edge_scale = (tgt_block > 0).to(recon_block.dtype)
-        sq_pos = sq * edge_scale
-
+        
+        # Compute sq_pos more carefully to avoid large intermediate tensors
         sum_sq = sum_sq + sq.sum()
-        sum_sq_pos = sum_sq_pos + sq_pos.sum()
+        sum_sq_pos = sum_sq_pos + (sq * edge_scale).sum()
         count_all += sq.numel()
+        
+        # Explicitly delete intermediate tensors to free memory
+        del diff, sq, edge_scale, tgt_block, recon_block, recon_block_two, block_one, block_two
 
     if count_all == 0:
         # No bipartite entries; return zero loss tensor on correct device

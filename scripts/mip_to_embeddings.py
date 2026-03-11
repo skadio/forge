@@ -11,18 +11,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_forge_pkl', type=str, default='../models/forge_pretrained.pkl',
+    parser.add_argument('--input_forge_pkl', type=str, default='../models/iclr_forge_pretrain_trained.pkl',
                         help='Path to pre-trained or fine-tuned Forge pickle file')
     parser.add_argument('--model_type', type=str, default=Constants.FORGE_PRE_TRAIN,
                         help=('The type of the pretrained model to load.'
                               'Available options: ' + ', '.join([Constants.FORGE_PRE_TRAIN,
                                                                  Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                                                  Constants.FORGE_FINE_TUNE_VARIABLE_PROBA])))
-    parser.add_argument('--input_mips', type=str, default='../data/instances/',
+    parser.add_argument('--input_mips', type=str, default='../data/sat_instances/',
                         help='Path to MIP file, directory, or model')
-    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/g4satbench_test.txt',
                         help='Directory containing input MIP instance files')
-    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='../models/mip_to_embeddings.pkl',
+    parser.add_argument('--output_mip_to_embeddings_pkl', type=str,  default='../models/g4satbench_test_mip_to_embeddings.pkl',
                         help='Output pickle file for embeddings')
     parser.add_argument('--instance_embedding_only', dest='instance_embedding_only', action='store_true',
                         help='Only save instance embedding')
