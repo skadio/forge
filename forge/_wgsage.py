@@ -33,9 +33,28 @@ class EdgeWeightedSAGEConv(MessagePassing):
         # Transform neighbor features before message passing
         x = self.lin_neigh(x)
 
+        # Number of edges must match
+        num_edges = edge_index.shape[1]
+        
         # Default edge_weight to ones if not provided
         if edge_weight is None:
-            edge_weight = x.new_ones(edge_index.size(1))
+            edge_weight = x.new_ones(num_edges)
+        else:
+            # Keep edge_weight as-is (don't force dtype conversion)
+            # Just ensure it's on the same device as x, but preserve its dtype
+            if edge_weight.device != x.device:
+                edge_weight = edge_weight.to(device=x.device)
+            
+            # Flatten edge_weight to 1D if needed
+            if edge_weight.dim() != 1:
+                edge_weight = edge_weight.view(-1)
+            
+            # Validate edge_weight size matches number of edges
+            if edge_weight.shape[0] != num_edges:
+                raise RuntimeError(
+                    f"edge_weight has {edge_weight.shape[0]} elements but edge_index has {num_edges} edges. "
+                    f"edge_index shape: {edge_index.shape}, edge_weight shape: {edge_weight.shape}"
+                )
 
         # Run message passing:
         #   - message() is called for each edge (i -> j)
@@ -53,7 +72,8 @@ class EdgeWeightedSAGEConv(MessagePassing):
                 edge_weight: torch.Tensor,  # [E]
                 ) -> torch.Tensor:
         # Weight each neighbor contribution
-        return edge_weight.view(-1, 1) * x_j
+        # edge_weight should already be on the correct device and dtype from forward()
+        return edge_weight.unsqueeze(1) * x_j
 
     def update(self,
                aggr_out: torch.Tensor,  # aggregated neighbor messages [N, F_out]

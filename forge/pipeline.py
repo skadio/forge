@@ -5,6 +5,7 @@ from typing import Union, List, Sequence, Dict, Optional, Iterator
 import gurobipy as gp
 from tqdm import tqdm
 import torch
+import torch.distributed as dist
 import numpy as np
 
 from forge.embeddings import Forge
@@ -75,7 +76,9 @@ def finetune_integral_gap(forge: Forge,
     """
 
     # Load pre-trained Forge model ready for fine-tuning
-    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_base = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_base.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
 
     _validate_forge(forge, check_trained=True)
 
@@ -100,7 +103,9 @@ def finetune_integral_gap(forge: Forge,
                                                         has_return=True)
 
     # Fine-tune the Forge model
-    forge._finetune_integral_gap(input_mip_to_gapinfo=mip_to_gapinfo,
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_module = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_module._finetune_integral_gap(input_mip_to_gapinfo=mip_to_gapinfo,
                                  output_forge_finetuned_pkl=output_forge_finetuned_pkl,
                                  epochs=epochs,
                                  steps_per_instance=steps_per_instance,
@@ -116,12 +121,16 @@ def finetune_sat_prediction(forge: Forge,
                            input_sat_instances_file: Optional[str],
                            output_forge_finetuned_pkl: str,
                            output_sat_to_satinfo_pkl: str,
+                           output_log_file: Optional[str] = None,
                            input_sat_to_satinfo_pkl: Optional[str] = None,
                            epochs: Optional[int] = None,
                            steps_per_instance: Optional[int] = None,
                            learning_rate: Optional[float] = None,
                            weight_decay: Optional[float] = None,
-                           max_graph_nodes: Optional[int] = None) -> None:
+                           max_graph_nodes: Optional[int] = None,
+                           freeze_level: str = "none",
+                           bce_weight: float = 0.8,
+                           contrastive_weight: float = 0.2) -> None:
     """Fine-tune a pre-trained Forge model for SAT satisfiability prediction from a folder of SAT files.
 
     Parameters
@@ -131,7 +140,11 @@ def finetune_sat_prediction(forge: Forge,
     input_forge_pkl : str
         Path to the pre-trained Forge model pickle file.
     model_type : str
-        The type of the model to use (e.g., "fine-tune").
+        The type of the model to load. Valid values are:
+        - Constants.FORGE_PRE_TRAIN: pre-trained model for SAT prediction
+        - Constants.FORGE_FINE_TUNE_INTEGRAL_GAP: fine-tuned for integral gap prediction
+        - Constants.FORGE_FINE_TUNE_VARIABLE_PROBA: fine-tuned for variable probability prediction
+        - Constants.FORGE_FINE_TUNE_SAT: fine-tuned for SAT satisfiability prediction with SAT-specific layers
     input_sat_folder : str
         Path to the folder containing SAT files for fine-tuning (in LP/MPS format).
     input_sat_instances_file : Optional[str]
@@ -140,10 +153,15 @@ def finetune_sat_prediction(forge: Forge,
         Path to save the fine-tuned Forge model as a pickle file.
     output_sat_to_satinfo_pkl : str
         Path to save the mapping from SAT files to satisfiability information as a pickle file.
+    output_log_file : Optional[str], default=None
+        Optional path to append fine-tuning logs; if None, logs are not written to disk.
     input_sat_to_satinfo_pkl : Optional[str], default=None
         Path to an existing pickle file containing SAT to satisfiability information.
+        This should contain ONLY the instances to use for training (pre-filtered as needed).
+        If provided, it will be used directly; input_sat_folder and input_sat_instances_file are ignored.
         If not provided, it will be generated from the SAT instances in the `input_sat_folder`
-        by extracting satisfiability labels from filenames (must contain "_sat" or "_unsat").
+        using `input_sat_instances_file` to filter which instances to include.
+        By extracting satisfiability labels from filenames (must contain "_sat" or "_unsat").
     epochs : Optional[int], default=None
         Number of epochs for fine-tuning.
     steps_per_instance : Optional[int], default=None
@@ -154,6 +172,16 @@ def finetune_sat_prediction(forge: Forge,
         Weight decay for fine-tuning.
     max_graph_nodes : Optional[int], default=None
         Maximum number of graph nodes allowed.
+    freeze_level : str, default="none"
+        How much to freeze:
+        - "none": Train all parameters (encoder + SAT head)
+        - "partial": Freeze early layers, train graph_layer_2 + linear + SAT head
+        - "full": Freeze encoder, train SAT head only
+    bce_weight : float, default=0.8
+        Weight for BCE (classification) loss in combined loss. Recommend 0.8-0.95.
+    contrastive_weight : float, default=0.2
+        Weight for contrastive (embedding separation) loss in combined loss. Recommend 0.05-0.2.
+        Note: bce_weight + contrastive_weight should equal 1.0 for proper loss scaling.
 
     Returns
     -------
@@ -167,7 +195,9 @@ def finetune_sat_prediction(forge: Forge,
     """
 
     # Load pre-trained Forge model ready for fine-tuning
-    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_base = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_base.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type, strict=False)
 
     _validate_forge(forge, check_trained=True)
 
@@ -176,6 +206,8 @@ def finetune_sat_prediction(forge: Forge,
         check_true(os.path.isfile(input_sat_to_satinfo_pkl),
                    ValueError(f"Error: {input_sat_to_satinfo_pkl!r} does not exist."))
         sat_to_satinfo = load_pickle(input_sat_to_satinfo_pkl)
+        print(f"\nLoaded pre-filtered SAT instances from: {input_sat_to_satinfo_pkl}")
+        print(f"Will use {len(sat_to_satinfo)} instances for training")
     else:
         check_true(input_sat_to_satinfo_pkl is None and os.path.isdir(input_sat_folder),
                    ValueError("Error: Either `input_sat_to_satinfo_pkl` must be provided, "
@@ -187,15 +219,29 @@ def finetune_sat_prediction(forge: Forge,
                                                                     input_sat_instances_file=input_sat_instances_file,
                                                                     output_sat_to_satinfo_pkl=output_sat_to_satinfo_pkl,
                                                                     has_return=True)
+        print(f"\nGenerated SAT info from: {input_sat_folder}")
+        if input_sat_instances_file:
+            print(f"Using instances from: {input_sat_instances_file}")
+        print(f"Will use {len(sat_to_satinfo)} instances for training")
+
+    # Verify that we have instances to train on
+    if not sat_to_satinfo:
+        raise ValueError("No SAT instances available for training. Check input_sat_to_satinfo_pkl or input paths.")
 
     # Fine-tune the Forge model
-    forge._finetune_sat_prediction(input_sat_to_satinfo=sat_to_satinfo,
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_module = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_module._finetune_sat_prediction(input_sat_to_satinfo=sat_to_satinfo,
                                    output_forge_finetuned_pkl=output_forge_finetuned_pkl,
+                                   output_log_file=output_log_file,
                                    epochs=epochs,
                                    steps_per_instance=steps_per_instance,
                                    learning_rate=learning_rate,
                                    weight_decay=weight_decay,
-                                   max_graph_nodes=max_graph_nodes)
+                                   max_graph_nodes=max_graph_nodes,
+                                   freeze_level=freeze_level,
+                                   bce_weight=bce_weight,
+                                   contrastive_weight=contrastive_weight)
 
 
 def pretrain(forge: Forge,
@@ -210,7 +256,10 @@ def pretrain(forge: Forge,
              steps_per_instance: Optional[int] = None,
              learning_rate: Optional[float] = None,
              weight_decay: Optional[float] = None,
-             max_graph_nodes: Optional[int] = None) -> None:
+             max_graph_nodes: Optional[int] = None,
+             rank: int = 0,
+             world_size: int = 1,
+             gpu_memory_fraction: float = 0.8) -> None:
     """Pre-train a Forge model.
 
     You can provide either:
@@ -251,6 +300,13 @@ def pretrain(forge: Forge,
     max_graph_nodes : Optional[int], optional
         Maximum number of graph nodes when converting MIP instances to bipartite graph.
         If `None`, no additional node cap is applied beyond defaults in the conversion utilities.
+    rank : int, default=0
+        Rank of current process in distributed training (0 for single GPU).
+    world_size : int, default=1
+        Total number of processes in distributed training (1 for single GPU).
+        Dataset will be partitioned so each rank processes a different subset.
+    gpu_memory_fraction : float, default=0.8
+        Target GPU memory usage fraction (0.0 to 1.0). Smart fallback to CPU if exceeded.
 
     Raises
     ------
@@ -262,10 +318,19 @@ def pretrain(forge: Forge,
     """
     _validate_forge(forge)
 
-    # MIP processor
-    mip_processor = MIPProcessor(seed=forge.seed)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    import torch.nn as nn
+    if isinstance(forge, nn.DataParallel):
+        forge_module = forge.module
+    elif isinstance(forge, nn.parallel.DistributedDataParallel):
+        forge_module = forge.module
+    else:
+        forge_module = forge
 
-    # Use existing mip_to_integral_gap if given, or generate it
+    # MIP processor
+    mip_processor = MIPProcessor(seed=forge_module.seed)
+
+    # Use existing mip_to_mipinfo if given, or generate it
     if input_mip_to_mipinfo_pkl:
         check_true(os.path.isfile(input_mip_to_mipinfo_pkl),
                    ValueError(f"Error: `input_mip_to_mipinfo_pkl` {input_mip_to_mipinfo_pkl!r} does not exist."))
@@ -284,17 +349,98 @@ def pretrain(forge: Forge,
         pkl_to_load = output_mip_to_mipinfo_pkl
 
     # Load MIPInfo objects for training
-    mipinfo_list = _MIPUtils.load_mipinfo_from_pickles([pkl_to_load])
+    # Each rank loads and partitions independently using the same seed
+    # This avoids the need to broadcast or serialize the entire dataset
+    # Each rank uses deterministic shuffling (seed=42) so they all get the same partition
+    print(f"Rank {rank}: Loading MIPInfo from pickle: {pkl_to_load}")
+    try:
+        mipinfo_list = _MIPUtils.load_mipinfo_from_pickles([pkl_to_load])
+        print(f"Rank {rank}: Successfully loaded {len(mipinfo_list)} MIPInfo objects")
+    except Exception as e:
+        print(f"ERROR: Rank {rank} failed to load pickle: {e}", flush=True)
+        raise
+    
+    # CRITICAL: Filter by max_graph_nodes BEFORE partitioning
+    # This ensures balanced load across ranks
+    # If done during training, different ranks skip different numbers of instances → load imbalance
+    if max_graph_nodes is not None and max_graph_nodes > 0:
+        num_before_filter = len(mipinfo_list)
+        mipinfo_list = [
+            info for info in mipinfo_list
+            if (getattr(info, 'num_cons', None) or getattr(info, 'num_clauses', None)) + info.num_vars <= max_graph_nodes
+        ]
+        num_after_filter = len(mipinfo_list)
+        if num_before_filter != num_after_filter:
+            print(f"Rank {rank}: Filtered by max_graph_nodes={max_graph_nodes}: "
+                  f"{num_before_filter} -> {num_after_filter} instances (removed {num_before_filter - num_after_filter})")
+    
+    # Synchronize all ranks to ensure all have loaded successfully
+    if world_size > 1:
+        try:
+            dist.barrier()
+        except Exception as e:
+            print(f"ERROR: Rank {rank} barrier failed: {e}", flush=True)
+            raise
+        print(f"Rank {rank}: Passed loading barrier")
+    
+    # Partition instances by rank
+    # CRITICAL FOR TORCHRUN: Partition instances by rank to avoid all processes training on all data
+    # Without this, each process trains on duplicate data → inefficient and may cause divergence
+    if world_size > 1:
+        original_count = len(mipinfo_list)
+        
+        # Shuffle with fixed seed to ensure deterministic partitioning across all ranks
+        # Each rank does this independently, so they all get the same partition
+        import random
+        random.seed(42)  # Fixed seed for reproducibility across all ranks
+        random.shuffle(mipinfo_list)
+        
+        # Now do round-robin partitioning on shuffled data
+        # Rank 0 gets indices 0, world_size, 2*world_size, ...
+        # Rank 1 gets indices 1, world_size+1, 2*world_size+1, ...
+        partitioned_list = [mipinfo_list[i] for i in range(rank, len(mipinfo_list), world_size)]
+        
+        # AGGRESSIVE MEMORY CLEANUP: Delete full list immediately, keep only partition
+        del mipinfo_list
+        mipinfo_list = partitioned_list
+        del partitioned_list
+        
+        if rank == 0:
+            print(f"\nShuffled then partitioned {original_count} instances across {world_size} ranks")
+            print(f"(Data shuffled with seed=42 for deterministic distribution)")
+            print(f"Rank 0 will process: {len(mipinfo_list)} instances")
+            print(f"(Each rank processes ~{original_count // world_size} instances)\n")
+    
+    
+    # Very aggressive garbage collection
+    import gc as gc_module
+    gc_module.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
     # Pre-train the Forge model
-    forge._pretrain(input_mipinfo_list=mipinfo_list,
-                    output_forge_pkl=output_forge_pretrained_pkl,
-                    output_log_file=output_log_file,
-                    epochs=epochs,
-                    steps_per_instance=steps_per_instance,
-                    learning_rate=learning_rate,
-                    weight_decay=weight_decay,
-                    max_graph_nodes=max_graph_nodes)
+    # CRITICAL: Unwrap from DistributedDataParallel since we already manually partitioned data per rank
+    # Keep model on original device (GPU) but remove the wrapper to avoid NCCL synchronization overhead
+    if isinstance(forge, nn.parallel.DistributedDataParallel):
+        forge_module = forge.module
+        # Ensure the unwrapped module is still on the correct device
+        device = next(forge.module.parameters()).device
+        forge_module = forge_module.to(device)
+    else:
+        forge_module = forge.module if isinstance(forge, nn.DataParallel) else forge
+    
+    forge_module._pretrain(input_mipinfo_list=mipinfo_list,
+                           output_forge_pkl=output_forge_pretrained_pkl,
+                           output_log_file=output_log_file,
+                           epochs=epochs,
+                           steps_per_instance=steps_per_instance,
+                           learning_rate=learning_rate,
+                           weight_decay=weight_decay,
+                           max_graph_nodes=None,  # Already filtered above before partitioning
+                           rank=0,  # After partition, each process is rank 0 for its subset
+                           world_size=1,  # After partition, each process has its own data
+                           gpu_memory_fraction=gpu_memory_fraction)
 
 
 def mip_to_embeddings(forge: Forge,
@@ -341,7 +487,9 @@ def mip_to_embeddings(forge: Forge,
     """
 
     # Load pre-trained Forge model
-    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_base = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_base.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
     _validate_forge(forge, check_trained=True)
 
     # Normalize input: accept a folder path, a single MIP file path, a list of paths,
@@ -454,7 +602,9 @@ def mip_to_gapinfo(forge: Forge,
     """
 
     # Load pre-trained Forge model
-    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_base = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_base.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
 
     _validate_forge(forge, check_trained=True)
 
@@ -553,8 +703,11 @@ def mip_to_mipinfo(forge: Forge,
     """
     _validate_forge(forge)
 
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_module = forge.module if hasattr(forge, 'module') else forge
+
     # MIP processor
-    mip_processor = MIPProcessor(seed=forge.seed)
+    mip_processor = MIPProcessor(seed=forge_module.seed)
 
     check_true(os.path.isdir(input_mip_folder),
                ValueError("Error: invalid `input_mip_folder` input_mip_folder={input_mip_folder!r}."))
@@ -682,21 +835,55 @@ def sat_pretrain(forge: Forge,
         pkl_to_load = output_sat_to_satinfo_pkl
 
     # Load SATInfo objects for training
-    satinfo_list = _SATUtils.load_satinfo_from_pickles([pkl_to_load])
+    # Each rank loads and partitions independently using the same seed
+    # This avoids the need to broadcast or serialize the entire dataset
+    # Each rank uses deterministic shuffling (seed=42) so they all get the same partition
+    print(f"Rank {rank}: Loading SATInfo from pickle: {pkl_to_load}")
+    try:
+        satinfo_list = _SATUtils.load_satinfo_from_pickles([pkl_to_load])
+        print(f"Rank {rank}: Successfully loaded {len(satinfo_list)} SATInfo objects")
+    except Exception as e:
+        print(f"ERROR: Rank {rank} failed to load pickle: {e}", flush=True)
+        raise
     
-    # CRITICAL FOR TORCHRUN: Partition instances by rank to avoid all processes loading all data
-    # Without this, each process loads the full dataset → memory multiplies by num_processes
+    # CRITICAL: Filter by max_graph_nodes BEFORE partitioning
+    # This ensures balanced load across ranks
+    # If done during training, different ranks skip different numbers of instances → load imbalance
+    if max_graph_nodes is not None and max_graph_nodes > 0:
+        num_before_filter = len(satinfo_list)
+        satinfo_list = [
+            info for info in satinfo_list
+            if (getattr(info, 'num_cons', None) or getattr(info, 'num_clauses', None)) + info.num_vars <= max_graph_nodes
+        ]
+        num_after_filter = len(satinfo_list)
+        if num_before_filter != num_after_filter:
+            print(f"Rank {rank}: Filtered by max_graph_nodes={max_graph_nodes}: "
+                  f"{num_before_filter} -> {num_after_filter} instances (removed {num_before_filter - num_after_filter})")
+    
+    # Synchronize all ranks to ensure all have loaded successfully
+    if world_size > 1:
+        try:
+            dist.barrier()
+        except Exception as e:
+            print(f"ERROR: Rank {rank} barrier failed: {e}", flush=True)
+            raise
+        print(f"Rank {rank}: Passed loading barrier")
+    
+    # Partition instances by rank
+    # CRITICAL FOR TORCHRUN: Partition instances by rank to avoid all processes training on all data
+    # Without this, each process trains on duplicate data → inefficient and may cause divergence
     if world_size > 1:
         original_count = len(satinfo_list)
         
-        # Shuffle first to ensure each rank gets a representative sample (not just indices i, i+world_size, i+2*world_size...)
-        # This is critical for fair gradient averaging: if unshuffled, each rank specializes on a subset of instance types
+        # Shuffle with fixed seed to ensure deterministic partitioning across all ranks
+        # Each rank does this independently, so they all get the same partition
         import random
         random.seed(42)  # Fixed seed for reproducibility across all ranks
         random.shuffle(satinfo_list)
         
         # Now do round-robin partitioning on shuffled data
         # Rank 0 gets indices 0, world_size, 2*world_size, ...
+        # Rank 1 gets indices 1, world_size+1, 2*world_size+1, ...
         partitioned_list = [satinfo_list[i] for i in range(rank, len(satinfo_list), world_size)]
         
         # AGGRESSIVE MEMORY CLEANUP: Delete full list immediately, keep only partition
@@ -706,9 +893,10 @@ def sat_pretrain(forge: Forge,
         
         if rank == 0:
             print(f"\nShuffled then partitioned {original_count} instances across {world_size} ranks")
-            print(f"(Data shuffled with seed=42 to ensure representative distribution per rank)")
+            print(f"(Data shuffled with seed=42 for deterministic distribution)")
             print(f"Rank 0 will process: {len(satinfo_list)} instances")
             print(f"(Each rank processes ~{original_count // world_size} instances)\n")
+    
     
     # Very aggressive garbage collection
     import gc as gc_module
@@ -718,16 +906,39 @@ def sat_pretrain(forge: Forge,
         torch.cuda.reset_peak_memory_stats()
 
     # Load pre-trained MIP weights if provided
-    if input_mip_forge_pkl:
+    if input_mip_forge_pkl is not None:
+        if rank == 0:
+            print(f"\n{'='*80}")
+            print(f"LOADING PRE-TRAINED MIP WEIGHTS")
+            print(f"{'='*80}")
         check_true(os.path.isfile(input_mip_forge_pkl),
                    ValueError(f"Error: `input_mip_forge_pkl` {input_mip_forge_pkl!r} does not exist."))
-        print(f"\nLoading pre-trained MIP weights from: {input_mip_forge_pkl}")
+        if rank == 0:
+            print(f"Path: {input_mip_forge_pkl}")
+            print(f"File exists: {os.path.isfile(input_mip_forge_pkl)}")
+            print(f"File size: {os.path.getsize(input_mip_forge_pkl) / 1e6:.2f} MB")
         forge_module.load_weights_from_pretrained(input_mip_forge_pkl)
-        print(f"Pre-trained MIP weights loaded successfully!\n")
+        if rank == 0:
+            print(f"Pre-trained MIP weights loaded successfully!")
+            print(f"{'='*80}\n")
+    else:
+        if rank == 0:
+            print(f"\n{'='*80}")
+            print(f"NO PRE-TRAINED MIP MODEL PROVIDED")
+            print(f"Starting SAT pre-training from random initialization")
+            print(f"{'='*80}\n")
 
-    # Pre-train the Forge model (use underlying module if wrapped with DataParallel or DistributedDataParallel)
-    # Since we already partitioned instances by rank above, pass world_size=1 to avoid double partitioning
-    forge_module = forge.module if isinstance(forge, (nn.DataParallel, nn.parallel.DistributedDataParallel)) else forge
+    # Pre-train the Forge model
+    # CRITICAL: Unwrap from DistributedDataParallel since we already manually partitioned data per rank
+    # Keep model on original device (GPU) but remove the wrapper to avoid NCCL synchronization overhead
+    if isinstance(forge, nn.parallel.DistributedDataParallel):
+        forge_module = forge.module
+        # Ensure the unwrapped module is still on the correct device
+        device = next(forge.module.parameters()).device
+        forge_module = forge_module.to(device)
+    else:
+        forge_module = forge.module if isinstance(forge, nn.DataParallel) else forge
+    
     forge_module._pretrain(input_mipinfo_list=satinfo_list,
                            output_forge_pkl=output_forge_pretrained_pkl,
                            output_log_file=output_log_file,
@@ -735,7 +946,7 @@ def sat_pretrain(forge: Forge,
                            steps_per_instance=steps_per_instance,
                            learning_rate=learning_rate,
                            weight_decay=weight_decay,
-                           max_graph_nodes=max_graph_nodes,
+                           max_graph_nodes=None,  # Already filtered above before partitioning
                            rank=0,  # After partition, each process is rank 0 for its subset
                            world_size=1,  # After partition, each process has its own data
                            gpu_memory_fraction=gpu_memory_fraction)
@@ -879,12 +1090,13 @@ def sat_to_embeddings(forge: Forge,
     """
 
     # Load pre-trained Forge model
-    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_base = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
+    forge_base.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
     _validate_forge(forge, check_trained=True)
 
     # Extract underlying module if wrapped with DataParallel
-    import torch.nn as nn
-    forge_module = forge.module if isinstance(forge, nn.DataParallel) else forge
+    forge_module = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
 
     # SAT processor
     sat_processor = SATProcessor(seed=forge_module.seed)
@@ -952,3 +1164,247 @@ def sat_to_embeddings(forge: Forge,
     save_pickle(sat_to_embeddings, output_sat_to_embeddings_pkl)
 
     return sat_to_embeddings
+
+
+def mixed_pretrain(forge: Forge,
+                   input_mip_folder: Optional[str],
+                   input_sat_folder: Optional[str],
+                   input_mip_instances_file: Optional[str],
+                   input_sat_instances_file: Optional[str],
+                   output_mip_to_mipinfo_pkl: str,
+                   output_sat_to_satinfo_pkl: str,
+                   output_forge_pretrained_pkl: str,
+                   output_log_file: str,
+                   input_mip_to_mipinfo_pkl: Optional[str] = None,
+                   input_sat_to_satinfo_pkl: Optional[str] = None,
+                   relaxation_list: Optional[List[float]] = None,
+                   mip_sat_ratio: float = 0.5,
+                   epochs: Optional[int] = None,
+                   steps_per_instance: Optional[int] = None,
+                   mip_learning_rate: Optional[float] = None,
+                   sat_learning_rate: Optional[float] = None,
+                   mip_weight_decay: Optional[float] = None,
+                   sat_weight_decay: Optional[float] = None,
+                   max_mip_graph_nodes: Optional[int] = None,
+                   max_sat_graph_nodes: Optional[int] = None,
+                   gradient_accumulation_steps: int = 1,
+                   rank: int = 0,
+                   world_size: int = 1,
+                   gpu_memory_fraction: float = 0.8) -> None:
+    """Pre-train a Forge model with interleaved mixed batches of SAT and MIP instances.
+    
+    Trains the model simultaneously on both problem types, interleaving instances with a configurable
+    MIP/SAT ratio. This allows the model to learn shared representations across both domains while
+    maintaining instance-type-specific hyperparameters (learning rate, weight decay, etc.).
+
+    Parameters
+    ----------
+    forge : `Forge`
+        Forge instance to train. Must be a `Forge` object.
+    input_mip_folder : str or None
+        Path to a directory containing MIP files to convert to MIPInfo.
+    input_sat_folder : str or None
+        Path to a directory containing SAT files (LP/MPS format) to convert to SATInfo.
+    input_mip_instances_file : str or None
+        If provided, only include MIP instances from input_mip_folder listed in the file.
+    input_sat_instances_file : str or None
+        If provided, only include SAT instances from input_sat_folder listed in the file.
+    output_mip_to_mipinfo_pkl : str
+        Filepath where the generated mip_to_mipinfo mapping will be saved (pickle).
+    output_sat_to_satinfo_pkl : str
+        Filepath where the generated sat_to_satinfo mapping will be saved (pickle).
+    output_forge_pretrained_pkl : str
+        Filepath where the trained Forge object will be saved (pickle).
+    output_log_file : str
+        Filepath for storing pretraining logs.
+    input_mip_to_mipinfo_pkl : str or None
+        Optional path to an existing mip_to_mipinfo pickle to load instead of generating it.
+    input_sat_to_satinfo_pkl : str or None
+        Optional path to an existing sat_to_satinfo pickle to load instead of generating it.
+    relaxation_list : List[float]
+        Sequence of relaxation values to apply to MIP instances to generate relaxed instances.
+    mip_sat_ratio : float, default=0.5
+        Ratio of MIP to SAT instances when interleaving. 0.5 means alternate between MIP and SAT.
+        Values < 0.5 favor SAT instances, values > 0.5 favor MIP instances.
+    epochs : Optional[int], optional
+        Number of training epochs. If `None`, a default value configured in `forge` will be used.
+    steps_per_instance : Optional[int], optional
+        Number of training steps to perform per instance per epoch.
+    mip_learning_rate : Optional[float], optional
+        Learning rate for MIP instances. If `None`, uses config default or mip_learning_rate parameter.
+    sat_learning_rate : Optional[float], optional
+        Learning rate for SAT instances. If `None`, uses config default or sat_learning_rate parameter.
+    mip_weight_decay : Optional[float], optional
+        Weight decay for MIP instances.
+    sat_weight_decay : Optional[float], optional
+        Weight decay for SAT instances.
+    max_mip_graph_nodes : Optional[int], optional
+        Maximum number of graph nodes for MIP instances.
+    max_sat_graph_nodes : Optional[int], optional
+        Maximum number of graph nodes for SAT instances.
+    gradient_accumulation_steps : int, default=1
+        Number of steps to accumulate gradients before optimizer step.
+    rank : int, default=0
+        Rank of current process in distributed training (0 for single GPU).
+    world_size : int, default=1
+        Total number of processes in distributed training (1 for single GPU).
+    gpu_memory_fraction : float, default=0.8
+        Target GPU memory usage fraction (0.0 to 1.0).
+
+    Raises
+    ------
+    TypeError
+        If `forge` is not a `Forge` instance.
+    ValueError
+        If paths are invalid or required files do not exist.
+    """
+    _validate_forge(forge)
+
+    # Extract underlying module if wrapped with DataParallel or DistributedDataParallel
+    forge_module = forge.module if hasattr(forge, 'module') else forge
+
+    # MIP processor
+    mip_processor = MIPProcessor(seed=forge_module.seed)
+    
+    # SAT processor
+    sat_processor = SATProcessor(seed=forge_module.seed)
+
+    # Load or generate MIPInfo
+    if input_mip_to_mipinfo_pkl:
+        check_true(os.path.isfile(input_mip_to_mipinfo_pkl),
+                   ValueError(f"Error: `input_mip_to_mipinfo_pkl` {input_mip_to_mipinfo_pkl!r} does not exist."))
+        mip_pkl_to_load = input_mip_to_mipinfo_pkl
+    else:
+        check_true(input_mip_to_mipinfo_pkl is None and os.path.isdir(input_mip_folder),
+                   ValueError("Error: Either `input_mip_to_mipinfo_pkl` must be provided, "
+                              "or a valid `input_mip_folder` must be specified to generate it."))
+        mip_processor.convert_mip_to_mipinfo(input_mip_folder=input_mip_folder,
+                                             input_mip_instances_file=input_mip_instances_file,
+                                             output_mip_to_mipinfo_pkl=output_mip_to_mipinfo_pkl,
+                                             relaxation_list=relaxation_list, has_return=False)
+        mip_pkl_to_load = output_mip_to_mipinfo_pkl
+
+    # Load or generate SATInfo
+    if input_sat_to_satinfo_pkl:
+        check_true(os.path.isfile(input_sat_to_satinfo_pkl),
+                   ValueError(f"Error: `input_sat_to_satinfo_pkl` {input_sat_to_satinfo_pkl!r} does not exist."))
+        sat_pkl_to_load = input_sat_to_satinfo_pkl
+    else:
+        check_true(input_sat_to_satinfo_pkl is None and os.path.isdir(input_sat_folder),
+                   ValueError("Error: Either `input_sat_to_satinfo_pkl` must be provided, "
+                              "or a valid `input_sat_folder` must be specified to generate it."))
+        sat_processor.convert_sat_lp_to_satinfo(input_sat_folder=input_sat_folder,
+                                               input_sat_instances_file=input_sat_instances_file,
+                                               output_sat_to_satinfo_pkl=output_sat_to_satinfo_pkl,
+                                               num_parallel_workers=1,
+                                               has_return=False,
+                                               max_graph_nodes=max_sat_graph_nodes)
+        sat_pkl_to_load = output_sat_to_satinfo_pkl
+
+    # Load MIPInfo and SATInfo objects
+    mipinfo_list = _MIPUtils.load_mipinfo_from_pickles([mip_pkl_to_load])
+    satinfo_list = _SATUtils.load_satinfo_from_pickles([sat_pkl_to_load])
+
+    # CRITICAL: Filter by max_graph_nodes BEFORE partitioning in _mixed_pretrain
+    # This ensures balanced load across ranks
+    # If done during training, different ranks skip different numbers of instances → load imbalance
+    if max_mip_graph_nodes is not None and max_mip_graph_nodes > 0:
+        num_before = len(mipinfo_list)
+        mipinfo_list = [
+            info for info in mipinfo_list
+            if (info.num_cons + info.num_vars) <= max_mip_graph_nodes
+        ]
+        num_after = len(mipinfo_list)
+        if num_before != num_after and rank == 0:
+            print(f"Filtered MIP by max_graph_nodes={max_mip_graph_nodes}: "
+                  f"{num_before} -> {num_after} instances (removed {num_before - num_after})")
+    
+    if max_sat_graph_nodes is not None and max_sat_graph_nodes > 0:
+        num_before = len(satinfo_list)
+        satinfo_list = [
+            info for info in satinfo_list
+            if (getattr(info, 'num_cons', None) or getattr(info, 'num_clauses', None)) + info.num_vars <= max_sat_graph_nodes
+        ]
+        num_after = len(satinfo_list)
+        if num_before != num_after and rank == 0:
+            print(f"Filtered SAT by max_graph_nodes={max_sat_graph_nodes}: "
+                  f"{num_before} -> {num_after} instances (removed {num_before - num_after})")
+
+    if rank == 0:
+        print(f"\n{'='*80}")
+        print(f"MIXED PRETRAIN: LOADED DATA")
+        print(f"{'='*80}")
+        print(f"MIP instances: {len(mipinfo_list)}")
+        print(f"SAT instances: {len(satinfo_list)}")
+        print(f"MIP/SAT ratio: {mip_sat_ratio}")
+        print(f"{'='*80}\n", flush=True)
+
+    # Create mixed list with instance type labels
+    # Each instance is tagged with ('mip' or 'sat', instance_object)
+    mixed_list = []
+    for mip_info in mipinfo_list:
+        mixed_list.append(('mip', mip_info))
+    for sat_info in satinfo_list:
+        mixed_list.append(('sat', sat_info))
+
+    # Interleave instances based on mip_sat_ratio
+    # Algorithm: for every 100 instances, aim for mip_sat_ratio * 100 MIPs and (1 - mip_sat_ratio) * 100 SATs
+    import random
+    random.seed(42)  # Fixed seed for reproducibility
+    random.shuffle(mixed_list)
+    
+    # Greedy interleaving to maintain ratio
+    mip_indices = [i for i, (t, _) in enumerate(mixed_list) if t == 'mip']
+    sat_indices = [i for i, (t, _) in enumerate(mixed_list) if t == 'sat']
+    
+    # Reconstruct interleaved list
+    interleaved = []
+    mip_idx = 0
+    sat_idx = 0
+    total_to_add = len(mixed_list)
+    target_mips = int(total_to_add * mip_sat_ratio)
+    target_sats = total_to_add - target_mips
+    
+    mips_added = 0
+    sats_added = 0
+    
+    while mips_added < target_mips or sats_added < target_sats:
+        # Try to maintain ratio by adding from whichever pool is more behind
+        if mips_added < target_mips and (sats_added >= target_sats or 
+                                         mips_added / (target_mips + 1e-6) < sats_added / (target_sats + 1e-6)):
+            if mip_idx < len(mip_indices):
+                interleaved.append(mixed_list[mip_indices[mip_idx]])
+                mip_idx += 1
+                mips_added += 1
+        
+        if sats_added < target_sats and (mips_added >= target_mips or 
+                                         sats_added / (target_sats + 1e-6) < mips_added / (target_mips + 1e-6)):
+            if sat_idx < len(sat_indices):
+                interleaved.append(mixed_list[sat_indices[sat_idx]])
+                sat_idx += 1
+                sats_added += 1
+    
+    mixed_list = interleaved
+
+    if rank == 0:
+        mip_count = sum(1 for t, _ in mixed_list if t == 'mip')
+        sat_count = sum(1 for t, _ in mixed_list if t == 'sat')
+        print(f"Interleaved order: {mip_count} MIP, {sat_count} SAT (ratio: {mip_count/(mip_count+sat_count):.2%})")
+        print(f"First 20 instances: {[t for t, _ in mixed_list[:20]]}\n", flush=True)
+
+    # Pre-train with mixed batches
+    forge._mixed_pretrain(input_mixed_list=mixed_list,
+                          output_forge_pkl=output_forge_pretrained_pkl,
+                          output_log_file=output_log_file,
+                          epochs=epochs,
+                          steps_per_instance=steps_per_instance,
+                          mip_learning_rate=mip_learning_rate,
+                          sat_learning_rate=sat_learning_rate,
+                          mip_weight_decay=mip_weight_decay,
+                          sat_weight_decay=sat_weight_decay,
+                          max_mip_graph_nodes=None,  # Already filtered above
+                          max_sat_graph_nodes=None,  # Already filtered above
+                          gradient_accumulation_steps=gradient_accumulation_steps,
+                          rank=rank,
+                          world_size=world_size,
+                          gpu_memory_fraction=gpu_memory_fraction)

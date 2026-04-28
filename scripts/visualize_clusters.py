@@ -229,8 +229,12 @@ def prepare_embeddings(embeddings_dict):
             embed_list.append(emb.instance_embedding)
     
     embed_mat = np.array(embed_list)
+    print(f"✓ Prepared embedding matrix with shape {embed_mat.shape}")
     # L2 normalize each embedding - normalize by row (each sample)
-    embed_mat = embed_mat / (np.linalg.norm(embed_mat, axis=1, keepdims=True) + 1e-10)
+    #embed_mat = embed_mat / (np.linalg.norm(embed_mat, axis=1, keepdims=True) + 1e-10)
+    # print the shape of the denominator to check for any issues
+    #print(f"Denominator shape: {embed_mat.sum(axis=1).shape}")
+    embed_mat = embed_mat / (embed_mat.sum(axis = 1, keepdims=True) + 1e-10)
     return embed_mat
 
 
@@ -416,7 +420,40 @@ def purity_score(y_true, y_pred):
     return np.sum(np.amax(con_matrix, axis=0)) / np.sum(con_matrix)
 
 
-def cluster_embeddings(embed_mat, color_vec, n_runs=1):
+def visualize_embedding_histogram(embed_mat, output_file="embedding_values_histogram.png"):
+    """Create and save a histogram of all embedding values."""
+    print("Creating histogram of embedding values...")
+    
+    fig, ax = plt.subplots(figsize=(12, 6), dpi=300)
+    
+    # Flatten all embedding values and create histogram
+    all_values = embed_mat.flatten()
+    ax.hist(all_values, bins=100, edgecolor='black', alpha=0.7, color='steelblue')
+    
+    ax.set_xlabel('Embedding Value', fontsize=12)
+    ax.set_ylabel('Frequency', fontsize=12)
+    ax.set_title(f'Distribution of Embedding Values\n(Total values: {len(all_values):,})', fontsize=14)
+    ax.grid(True, alpha=0.3)
+    
+    # Add statistics text box
+    stats_text = f'Mean: {np.mean(all_values):.4f}\nStd: {np.std(all_values):.4f}\nMin: {np.min(all_values):.4f}\nMax: {np.max(all_values):.4f}'
+    ax.text(0.98, 0.97, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Create visualizations directory if it doesn't exist
+    viz_dir = "visualizations"
+    os.makedirs(viz_dir, exist_ok=True)
+    
+    hist_file = os.path.join(viz_dir, output_file)
+    plt.savefig(hist_file, dpi=300, bbox_inches='tight')
+    print(f"✓ Saved histogram to {hist_file}\n")
+    plt.close()
+
+
+def cluster_embeddings(embed_mat, color_vec, n_runs=10):
     """Cluster embeddings and compute NMI and purity scores."""
     
     print("Running K-means clustering analysis...")
@@ -482,7 +519,7 @@ def main():
         sys.exit(1)
     
     # Set seeds for reproducibility
-    np.random.seed(42)
+    #np.random.seed(42)
     
     pickle_file = sys.argv[1]
     skip_clustering = '--no-cluster' in sys.argv
@@ -546,8 +583,16 @@ def main():
     if config_file:
         config_base = os.path.splitext(os.path.basename(config_file))[0]
         output_file = f"{base_name}_{config_base}_{category_mode}_visualization.png"
+        hist_file = f"{base_name}_{config_base}_histogram.png"
     else:
         output_file = f"{base_name}_{category_mode}_visualization.png"
+        hist_file = f"{base_name}_histogram.png"
+    
+    # Create histogram of embedding values
+    print("=" * 70)
+    print("EMBEDDING VALUE DISTRIBUTION")
+    print("=" * 70)
+    visualize_embedding_histogram(embed_mat, hist_file)
     
     # Visualize
     print("=" * 70)

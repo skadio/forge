@@ -13,12 +13,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
                         help='Path to the training configuration YAML file')
-    parser.add_argument('--input_sat_folder', type=str, default='../data/satcomp2022anni_sat_instances/',
+    parser.add_argument('--input_sat_folder', type=str, default='../data/g4satbench_sat_instances/',
                         help='Directory containing input SAT instance files (LP/MPS format)')
     parser.add_argument('--input_sat_instances_file', type=str, default=None,
                         help='File containing list of SAT instances to use from input_sat_folder')
     parser.add_argument('--output_sat_to_satinfo_pkl', type=str,
-                        default='../models/satcomp2022anni_sat_to_satinfo.pkl',
+                        default='../models/g4satbench_test_april19_sat_to_satinfo.pkl',
                         help='Output path for the sat_to_satinfo pickle')
     parser.add_argument('--num_parallel_workers', type=int, default=1,
                         help='The number of parallel workers to use for satinfo generation')

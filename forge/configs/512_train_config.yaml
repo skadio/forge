@@ -1,0 +1,38 @@
+# General
+seed: 1283
+
+# Model Architecture Parameters
+input_dim: 10
+hidden_dim: 1024
+codeword_dim: 512
+codebook_size: 2048
+dropout_ratio: 0.4
+norm_type: "none"
+graph_sage_aggregation: "max" # add/mean/max # was mean before
+
+# Loss Weight Parameters (currently not used)
+lambda_edge: 1
+lambda_node: 1
+
+# Model Configuration Flags
+orthogonal_reg_weight: 0.0
+is_eval_mode: false
+
+# Decoder Parameters
+decoder_edge_dim: 32
+
+# Vector Quantization Parameters
+vq_decay: 0.8
+vq_commitment_weight: 0.25
+vq_is_cosine_sim: false
+
+# Training Parameters
+epochs: 10
+steps_per_instance: 10
+learning_rate: 1e-4
+weight_decay: 1e-4
+max_graph_nodes: 100000
+adj_block_size: 5120
+
+# Integral Gap
+integral_gap_safety_eps: 0.05

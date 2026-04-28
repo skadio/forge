@@ -6,6 +6,11 @@ import os
 # This reduces OOM errors when training models across GPUs
 os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 
+# NCCL debugging (set these BEFORE importing torch.distributed)
+# These help diagnose distributed training issues like timeouts
+os.environ['NCCL_DEBUG'] = 'INFO'  # Enable NCCL logging (INFO, WARN, TRACE)
+os.environ['NCCL_TIMEOUT'] = '600'  # NCCL collective ops timeout (seconds), will be increased if distributed
+
 # Add parent directory to path to use local forge module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,14 +43,14 @@ if __name__ == "__main__":
                         help='Number of training epochs')
     parser.add_argument('--steps_per_instance', type=int, default=10,
                         help='Number of training steps per SAT instance per epoch')
-    parser.add_argument('--learning_rate', type=float, default=1e-4,
-                        help='Learning rate for the optimizer')
-    parser.add_argument('--weight_decay', type=float, default=1e-4,
-                        help='Weight decay for the optimizer')
+    parser.add_argument('--learning_rate', type=float, default=5e-5,
+                        help='Learning rate for the optimizer (reduced to prevent overfitting)')
+    parser.add_argument('--weight_decay', type=float, default=1e-3,
+                        help='Weight decay for the optimizer (L2 regularization to prevent overfitting)')
     parser.add_argument('--max_graph_nodes', type=int, default=100000,
                         help='Maximum number of graph nodes when converting SAT instances to bipartite graph')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
-                        help='Number of steps to accumulate gradients before optimizer step')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=8,
+                        help='Number of steps to accumulate gradients before optimizer step (higher = more stable updates, better generalization)')
     parser.add_argument('--gpu_memory_fraction', type=float, default=0.8,
                         help='Target GPU memory usage fraction (default: 0.8). Smart fallback to CPU if exceeded.')
     args = parser.parse_args()
@@ -59,6 +64,10 @@ if __name__ == "__main__":
         rank = int(os.environ['RANK'])
         world_size = int(os.environ['WORLD_SIZE'])
         local_rank = int(os.environ.get('LOCAL_RANK', rank))
+        
+        # Increase NCCL timeout for distributed SAT pre-training
+        # Default is 10min (600s), set to 60min (3600s) for potentially long-running jobs
+        os.environ['NCCL_TIMEOUT'] = '3600'
         
         # Initialize the distributed process group
         dist.init_process_group(backend='nccl')
@@ -134,6 +143,12 @@ if __name__ == "__main__":
         print(f"Training completed!")
         print(f"Model saved to: {args.output_forge_pretrained_pkl}")
         print(f"{'='*80}\n", flush=True)
+    
+    # Synchronize all processes before cleanup (critical in distributed training)
+    if is_distributed:
+        dist.barrier()  # Wait for all ranks to finish
+        if rank == 0:
+            print("All ranks synchronized. Cleaning up distributed training...", flush=True)
     
     # Clean up distributed training
     if is_distributed:
