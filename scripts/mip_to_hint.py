@@ -1,0 +1,35 @@
+import argparse
+
+from forge.embeddings import Forge
+from forge.pipeline import mip_to_hint
+from forge.utils import Constants
+
+if __name__ == "__main__":
+    # Parameters
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_config_yaml', type=str, default='../forge/configs/train_config.yaml',
+                        help='Path to the training configuration YAML file')
+    parser.add_argument('--input_forge_pkl', type=str, default='../models/forge_variable_proba.pkl',
+                        help='Path to fine-tuned Forge pickle file')
+    parser.add_argument('--input_mips', type=str, default='../data/instances',
+                        help='Path to MIP file, directory, or model')
+    parser.add_argument('--input_mip_instances_file', type=str, default='../data/configs/all.txt',
+                        help='Directory containing input MIP instance files')
+    parser.add_argument('--output_mip_to_hintinfo_pkl', type=str, default='../models/mip_to_hintinfo.pkl',
+                        help='Output pickle file for hint info')
+    parser.add_argument('--problem_type', type=str, default='SC',
+                        help='The type of the problem domain CA, GISP, MVC, SC')
+
+    args = parser.parse_args()
+
+    # Create Forge with its training configuration
+    forge = Forge(args.train_config_yaml)
+
+    # Generate hints
+    mip_to_hintinfo_dict = mip_to_hint(forge=forge,
+                                       input_forge_pkl=args.input_forge_pkl,
+                                       model_type=Constants.FORGE_FINE_TUNE_VARIABLE_PROBA,
+                                       input_mips=args.input_mips,
+                                       input_mip_instances_file=args.input_mip_instances_file,
+                                       output_mip_to_hintinfo_pkl=args.output_mip_to_hintinfo_pkl,
+                                       problem_type=args.problem_type)
