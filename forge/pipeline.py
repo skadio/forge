@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 from forge.embeddings import Forge
-from forge.labeler import MIPLabeler, GapInfo
+from forge.labeler import MIPLabeler, GapInfo, TripletInfo, HintInfo
 from forge.processor import MIPProcessor, _MIPUtils, MIPEmbeddings, MIPInfo
 from forge.utils import check_true, save_pickle, load_pickle
 
@@ -106,6 +106,95 @@ def finetune_integral_gap(forge: Forge,
                                  learning_rate=learning_rate,
                                  weight_decay=weight_decay,
                                  max_graph_nodes=max_graph_nodes)
+
+
+def finetune_variable_proba(forge: Forge,
+                            input_forge_pkl: str,
+                            model_type: str,
+                            input_mip_folder: str,
+                            input_mip_instances_file: Optional[str],
+                            output_forge_finetuned_pkl: str,
+                            output_mip_to_tripletinfo_pkl: str,
+                            input_mip_to_tripletinfo_pkl: Optional[str] = None,
+                            epochs: Optional[int] = None,
+                            steps_per_instance: Optional[int] = None,
+                            learning_rate: Optional[float] = None,
+                            weight_decay: Optional[float] = None,
+                            max_graph_nodes: Optional[int] = None,
+                            triplet_time_limit: int = 300,
+                            triplet_num_solutions: int = 5,
+                            batch_size: int = 1024) -> None:
+    """Fine-tune a pre-trained Forge model for variable probability prediction.
+
+    Parameters
+    ----------
+    forge : Forge
+        The Forge model to be fine-tuned.
+    input_forge_pkl : str
+        Path to the pre-trained Forge model pickle file.
+    model_type : str
+        The type of the model to use (e.g., "fine_tune_variable_proba").
+    input_mip_folder : str
+        Path to the folder containing MIP files for fine-tuning.
+    input_mip_instances_file : Optional[str]
+        Path to a text file listing instance names to include.
+    output_forge_finetuned_pkl : str
+        Path to save the fine-tuned Forge model as a pickle file.
+    output_mip_to_tripletinfo_pkl : str
+        Path to save the mapping from MIP files to triplet information as a pickle file.
+    input_mip_to_tripletinfo_pkl : Optional[str], default=None
+        Path to an existing pickle file containing MIP to TripletInfo mapping.
+        If not provided, it will be generated from the MIP instances.
+    epochs, steps_per_instance, learning_rate, weight_decay, max_graph_nodes :
+        Optional overrides for training hyperparameters.
+    triplet_time_limit : int, default=300
+        Time limit (in seconds) for each solution-pool MIP solve.
+    triplet_num_solutions : int, default=5
+        Number of solutions to collect via Gurobi's solution pool.
+    batch_size : int, default=1024
+        Batch size for triplet loss computation.
+
+    Returns
+    -------
+    None
+    """
+
+    # Load pre-trained Forge model ready for fine-tuning
+    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+
+    _validate_forge(forge, check_trained=True)
+
+    # Use existing mip_to_tripletinfo if given, or generate it
+    if input_mip_to_tripletinfo_pkl:
+        check_true(os.path.isfile(input_mip_to_tripletinfo_pkl),
+                   ValueError(f"Error: {input_mip_to_tripletinfo_pkl!r} does not exist."))
+        mip_to_tripletinfo = load_pickle(input_mip_to_tripletinfo_pkl)
+    else:
+        check_true(input_mip_to_tripletinfo_pkl is None and os.path.isdir(input_mip_folder),
+                   ValueError("Error: Either `input_mip_to_tripletinfo_pkl` must be provided, "
+                              "or a valid `input_mip_folder` must be specified to generate it."))
+
+        labeler = MIPLabeler()
+        mip_to_tripletinfo = labeler.convert_mip_to_tripletinfo(
+            input_mip_folder=input_mip_folder,
+            input_mip_instances_file=input_mip_instances_file,
+            output_mip_to_tripletinfo_pkl=output_mip_to_tripletinfo_pkl,
+            forge_model=forge,
+            triplet_time_limit=triplet_time_limit,
+            triplet_num_solutions=triplet_num_solutions,
+            has_return=True
+        )
+
+    # Fine-tune the Forge model
+    forge._finetune_variable_proba(input_mip_to_tripletinfo=mip_to_tripletinfo,
+                                   output_forge_finetuned_pkl=output_forge_finetuned_pkl,
+                                   epochs=epochs,
+                                   steps_per_instance=steps_per_instance,
+                                   learning_rate=learning_rate,
+                                   weight_decay=weight_decay,
+                                   max_graph_nodes=max_graph_nodes,
+                                   input_forge_pretrained_pkl=input_forge_pkl,
+                                   batch_size=batch_size)
 
 
 def pretrain(forge: Forge,
@@ -401,6 +490,78 @@ def mip_to_gapinfo(forge: Forge,
     save_pickle(mip_to_gap_info, output_mip_to_gapinfo_pkl)
 
     return mip_to_gap_info
+
+
+def mip_to_hint(forge: Forge,
+                input_forge_pkl: str,
+                model_type: str,
+                input_mips: Union[str, gp.Model, Sequence[Union[str, gp.Model]]],
+                input_mip_instances_file: Optional[str],
+                output_mip_to_hintinfo_pkl: str,
+                problem_type: str = 'SC') -> Dict[str, HintInfo]:
+    """Generate warm-start hints for one or more MIP inputs using a trained Forge instance.
+
+    Parameters
+    ----------
+    forge : Forge
+        A Forge instance.
+    input_forge_pkl : str
+        Path to the input Forge pickle file.
+    model_type : str
+        The type of the model to use (e.g., "fine_tune_variable_proba").
+    input_mips : str | gp.Model | Sequence[str | gp.Model]
+        Path to a directory containing MIP files, a single MIP file,
+        a single gurobipy model instance, or a list/tuple mixing these types.
+    input_mip_instances_file : Optional[str]
+        If provided, only include instances from input_mips listed in the file.
+    output_mip_to_hintinfo_pkl : str
+        Filepath where the resulting mapping from MIP identifiers to HintInfo
+        will be saved (pickle).
+    problem_type : str, default='SC'
+        The type of problem (SC, GISP, CA) for percentile threshold selection.
+
+    Returns
+    -------
+    Dict[str, HintInfo]
+        Mapping from MIP identifier to HintInfo object.
+    """
+
+    # Load fine-tuned Forge model
+    forge.load_model(input_forge_pkl=input_forge_pkl, model_type=model_type)
+
+    _validate_forge(forge, check_trained=True)
+
+    # Normalize input: accept a folder path, a single MIP file path, a list of paths,
+    mip_items = _MIPUtils.get_mip_items(input_mips, input_mip_instances_file)
+
+    # Start Gurobi environment
+    gurobi_env = _MIPUtils.start_gurobi_env()
+
+    # For each MIP item, create MIP model and generate hints
+    mip_to_hint_info = {}
+    for mip_item in mip_items:
+
+        print("<< Start: Create HintInfo", mip_item)
+
+        # Read MIP file to a Gurobi model (or use the provided model)
+        if isinstance(mip_item, gp.Model):
+            mip_model = mip_item
+            key = getattr(mip_model, "ModelName", f"gurobi_{id(mip_model)}")
+        else:
+            mip_model = gp.read(mip_item, env=gurobi_env)
+            key = mip_item
+
+        hint_info = forge._mip_model_to_hint(mip_model, prob_type=problem_type)
+        mip_to_hint_info[key] = hint_info
+
+        print("<< Finish: Create HintInfo", mip_item)
+
+    # Close Gurobi environment
+    gurobi_env.close()
+
+    save_pickle(mip_to_hint_info, output_mip_to_hintinfo_pkl)
+
+    return mip_to_hint_info
 
 
 def mip_to_mipinfo(forge: Forge,

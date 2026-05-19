@@ -6,6 +6,7 @@ from typing import List, Callable, Optional, Tuple, Union, Dict
 import gurobipy as gp
 import numpy as np
 import torch
+from sklearn.neighbors import NearestNeighbors
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -13,7 +14,7 @@ import yaml
 from vector_quantize_pytorch import VectorQuantize
 
 from forge._wgsage import EdgeWeightedSAGEConv, blockwise_loss
-from forge.labeler import GapInfo
+from forge.labeler import GapInfo, TripletInfo, HintInfo
 from forge.processor import MIPInfo, MIPEmbeddings, MIPProcessor, _MIPUtils
 from forge.utils import check_true, Constants, overwrite_if_given, copy_params
 
@@ -899,6 +900,353 @@ class Forge(nn.Module):
         gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
 
         return gap_info
+
+    def _finetune_variable_proba(self,
+                                 input_mip_to_tripletinfo: Dict[str, TripletInfo],
+                                 output_forge_finetuned_pkl: str,
+                                 epochs: Optional[int] = None,
+                                 steps_per_instance: Optional[int] = None,
+                                 learning_rate: Optional[float] = None,
+                                 weight_decay: Optional[float] = None,
+                                 max_graph_nodes: Optional[int] = None,
+                                 input_forge_pretrained_pkl: str = "",
+                                 batch_size: int = 1024) -> None:
+        """Fine-tune the Forge model for variable probability prediction.
+
+        Uses triplet margin loss to bring embeddings of variables appearing in the same
+        number of solutions closer together, combined with BCE loss on the probability
+        head and reconstruction loss.
+
+        Parameters
+        ----------
+        input_mip_to_tripletinfo : Dict[str, TripletInfo]
+            Mapping from MIP file paths to their TripletInfo objects.
+        output_forge_finetuned_pkl : str
+            Path to save the fine-tuned model state_dict.
+        epochs, steps_per_instance, learning_rate, weight_decay, max_graph_nodes :
+            Optional overrides for training hyperparameters.
+        input_forge_pretrained_pkl : str
+            Path to the pretrained Forge model for weight initialization.
+        batch_size : int, default=1024
+            Batch size for triplet loss computation.
+        """
+
+        epochs = overwrite_if_given(self.epochs, epochs)
+        steps_per_instance = overwrite_if_given(self.steps_per_instance, steps_per_instance)
+        learning_rate = overwrite_if_given(self.learning_rate, learning_rate)
+        weight_decay = overwrite_if_given(self.weight_decay, weight_decay)
+        max_graph_nodes = overwrite_if_given(self.max_graph_nodes, max_graph_nodes)
+
+        self.to(self.device)
+        self.train()
+        self.is_eval_mode = False
+
+        if not self.has_variable_proba_head and input_forge_pretrained_pkl != "":
+            print("Warning: Forge model missing variable proba head, adding head.")
+            self.has_variable_proba_head = True
+            self.variable_proba_layer = nn.Linear(self.updated_input_dim, 1)
+
+            pre_trained = Forge()
+            pre_trained.load_model(input_forge_pretrained_pkl, model_type=Constants.FORGE_PRE_TRAIN)
+            copy_params(old_model=pre_trained, new_model=self)
+            del pre_trained
+            torch.cuda.empty_cache()
+
+        triplet_loss_fn = nn.TripletMarginLoss(margin=2, p=2, eps=1e-7, reduction='mean')
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+        gurobi_env = _MIPUtils.start_gurobi_env()
+
+        mips = list(input_mip_to_tripletinfo.keys())
+        for epoch in range(epochs):
+
+            epoch_loss = []
+            t_epoch_loss = []
+            b_epoch_loss = []
+            r_epoch_loss = []
+
+            for idx, mip in enumerate(mips):
+
+                mip_model = gp.read(mip, env=gurobi_env)
+                mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+
+                num_nodes = mipinfo.num_cons + mipinfo.num_vars
+                if num_nodes > max_graph_nodes:
+                    continue
+
+                edge_index = mipinfo.edge_index.to(self.device)
+                edge_weight = mipinfo.edge_weight.to(self.device)
+                feature_tensor = mipinfo.feature_tensor.to(self.device)
+
+                triplet_info = input_mip_to_tripletinfo[mip]
+
+                for step in range(steps_per_instance):
+
+                    optimizer.zero_grad()
+
+                    h_list, h, recon_loss, indices, codebook_ = self.forward(
+                        feature_tensor, mipinfo.num_cons, mipinfo.num_vars, edge_index, edge_weight
+                    )
+
+                    # Variable embeddings and probability predictions
+                    emb = h[mipinfo.num_cons:, :]
+                    prob = h_list[-1][mipinfo.num_cons:, :]
+
+                    triplets = triplet_info.triplets.copy()
+                    y_true = triplet_info.y_true.to(self.device)
+
+                    # After half epochs, shuffle positives across solutions
+                    if epoch > epochs // 2:
+                        perm_1 = np.random.permutation(triplets.shape[0])
+                        perm_2 = np.random.permutation(triplets.shape[0])
+                        triplets[:, 0] = triplets[perm_1, 0]
+                        triplets[:, 1] = triplets[perm_2, 1]
+
+                    # Subsample if too many triplets
+                    if len(triplets) > 3000000:
+                        random_indices = np.random.choice(range(len(triplets)), size=2000000, replace=False)
+                        triplets = triplets[random_indices]
+
+                    # Triplet loss (batched)
+                    triplets_t = torch.from_numpy(triplets).long().to(self.device)
+                    if len(triplets) < batch_size:
+                        t_loss = triplet_loss_fn(emb[triplets_t[:, 0]], emb[triplets_t[:, 1]], emb[triplets_t[:, 2]])
+                    else:
+                        t_loss = torch.tensor(0.0, device=self.device)
+                        for batch in np.array_split(triplets, int(np.ceil(len(triplets) / batch_size))):
+                            batch_t = torch.from_numpy(batch).long().to(self.device)
+                            t_loss += triplet_loss_fn(emb[batch_t[:, 0]], emb[batch_t[:, 1]], emb[batch_t[:, 2]])
+
+                    bce_loss = F.binary_cross_entropy(prob, y_true)
+                    total_loss = (10 * t_loss) + (0.05 * bce_loss) + (0.01 * recon_loss)
+
+                    total_loss.backward()
+                    optimizer.step()
+
+                    print('\r', '(', idx, '/', len(mips), ') |', mip,
+                          '| T Loss:', np.round(t_loss.item(), 3),
+                          '| BCE Loss:', np.round(bce_loss.item(), 3),
+                          '| R Loss:', np.round(recon_loss.item(), 3), end='')
+
+                    epoch_loss.append(total_loss.item())
+                    t_epoch_loss.append(t_loss.item())
+                    b_epoch_loss.append(bce_loss.item())
+                    r_epoch_loss.append(recon_loss.item())
+
+            print("\nEpoch ", epoch + 1,
+                  "| Means | Loss:", np.round(np.mean(epoch_loss), 3),
+                  "| T Loss:", np.round(np.mean(t_epoch_loss), 3),
+                  "| BCE Loss:", np.round(np.mean(b_epoch_loss), 3),
+                  "| R Loss:", np.round(np.mean(r_epoch_loss), 3))
+            print()
+
+            torch.save(self.state_dict(), output_forge_finetuned_pkl)
+            np.random.shuffle(mips)
+
+        gurobi_env.close()
+
+    def _mip_model_to_hint(self, mip_model: gp.Model, prob_type: str = 'SC') -> HintInfo:
+        """Generate warm-start hints for a MIP model using the variable probability head.
+
+        Process
+        -------
+        - Forward pass to get variable embeddings and probability predictions.
+        - Seed MIP solve with 1s time limit.
+        - NearestNeighbors search in embedding space (k=50).
+        - Three-source voting: seed solve, prob head threshold, distance-based neighbors.
+        - Variables with 3 votes become final hints with priority ranks.
+
+        Parameters
+        ----------
+        mip_model : gurobipy.Model
+            An already-loaded Gurobi model object.
+        prob_type : str, default='SC'
+            Problem type for percentile threshold selection.
+
+        Returns
+        -------
+        HintInfo
+            hint_ones, hint_zeros: variable indices for 1/0 hints.
+            hint_pri_ones, hint_pri_zeros: integer priority ranks.
+        """
+
+        if not self.is_trained:
+            raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
+
+        self.eval()
+
+        original_mode = self.is_eval_mode
+        self.is_eval_mode = True
+
+        mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+
+        with torch.no_grad():
+            h_list, h, _, _, _ = self.forward(
+                mipinfo.feature_tensor.to(self.device),
+                mipinfo.num_cons, mipinfo.num_vars,
+                mipinfo.edge_index.to(self.device),
+                mipinfo.edge_weight.to(self.device)
+            )
+
+        self.is_eval_mode = original_mode
+
+        num_cons = mipinfo.num_cons
+        num_vars = mipinfo.num_vars
+
+        # Probability head output for each variable
+        output = h_list[-1][num_cons:].detach().cpu().numpy().flatten()
+
+        # Percentile thresholds vary by problem type
+        if prob_type in ['GISP']:
+            upper_perc, lower_perc = 98, 5
+        elif prob_type in ['CA']:
+            upper_perc, lower_perc = 98, 10
+        else:
+            upper_perc, lower_perc = 95, 10
+
+        bce_ones = np.where(output >= np.percentile(output, upper_perc))[0]
+        bce_zeros = np.where(output <= np.percentile(output, lower_perc))[0]
+
+        # Variable embeddings for nearest neighbor search
+        emb = h[num_cons:].detach().cpu().numpy()
+
+        # Seed MIP solve with 1s time limit
+        seed_model = mip_model.copy()
+        seed_model.setParam("OutputFlag", 0)
+        seed_model.setParam("Threads", 1)
+        seed_model.setParam("LPWarmStart", 2)
+        seed_model.setParam("TimeLimit", 1)
+        seed_model.setParam("MIPFocus", 0)
+        seed_model.optimize()
+
+        if seed_model.SolCount < 1:
+            return HintInfo(
+                hint_ones=np.array([], dtype=int),
+                hint_zeros=np.array([], dtype=int),
+                hint_pri_ones=[],
+                hint_pri_zeros=[]
+            )
+
+        seed_xn = np.array([v.x for v in seed_model.getVars()])
+        seed_ones = np.where(seed_xn == 1)[0]
+        seed_zeros = np.where(seed_xn == 0)[0]
+
+        # Nearest neighbors in embedding space
+        num_neigh = min(50, num_vars - 1)
+        nbrs = NearestNeighbors(n_neighbors=num_neigh, algorithm='kd_tree', p=2).fit(emb)
+        distances, indices = nbrs.kneighbors(emb[seed_ones]) if len(seed_ones) > 0 else (np.array([]), np.array([]))
+
+        if len(seed_ones) > 0 and len(distances) > 0:
+            distances = (distances - np.min(distances)) / (np.ptp(distances) + 1e-8)
+            max_distance = np.max(distances)
+
+            # Distance-based negative predictions
+            pred_zeros = set()
+            for i in seed_zeros:
+                for j in seed_ones:
+                    if prob_type in ['GISP', 'MVC']:
+                        delta = 0.3
+                    else:
+                        delta = 0.2
+                    if np.linalg.norm(emb[i] - emb[j], ord=2) > (max_distance + (delta * max_distance)):
+                        pred_zeros.add(i)
+
+            # Distance-based positive predictions (radius 0.3)
+            neighbors = set()
+            for i in range(len(distances)):
+                for j in range(len(distances[0])):
+                    if distances[i][j] <= 0.3:
+                        neighbors.add(indices[i][j])
+
+            pred_hints = list(np.unique(np.concatenate([seed_ones, list(neighbors)])))
+
+            # Remove overlapping nodes
+            intersection = list(set(pred_hints).intersection(set(pred_zeros)))
+            pred_hints = [x for x in pred_hints if x not in intersection]
+            pred_zeros_list = [x for x in pred_zeros if x not in intersection]
+        else:
+            pred_hints = list(seed_ones)
+            pred_zeros_list = list(seed_zeros)
+
+        # 3-source voting
+        final_ones = np.zeros(num_vars)
+        final_ones[pred_hints] += 1
+        final_ones[seed_ones] += 1
+        final_ones[bce_ones] += 1
+
+        final_zeros = np.zeros(num_vars)
+        final_zeros[pred_zeros_list] += 1
+        final_zeros[seed_zeros] += 1
+        final_zeros[bce_zeros] += 1
+
+        # Priority ranks for positive hints (based on distance to nearest seed)
+        global_pos_rank = np.zeros((num_vars, 1)) + 1
+        if len(pred_hints) > 0 and len(seed_ones) > 0:
+            dist = []
+            for i in pred_hints:
+                min_dist = np.inf
+                for j in seed_ones:
+                    d = np.linalg.norm(emb[i] - emb[j])
+                    if d < min_dist:
+                        min_dist = d
+                dist.append(min_dist)
+
+            dist = np.array(dist)
+            pos_ranks = np.array([100 - (np.sum(dist <= x) / len(dist) * 100) for x in dist])
+            pos_ranks = (pos_ranks - np.min(pos_ranks)) / (np.ptp(pos_ranks) + 1e-6)
+            pos_ranks = (pos_ranks * 100).astype(int)
+            for idx, i in enumerate(pred_hints):
+                global_pos_rank[i] = pos_ranks[idx]
+
+        # Priority ranks for prob-head positives
+        if len(bce_ones) > 0:
+            b_o = output[bce_ones]
+            b_pos_rank = np.array([np.sum(b_o <= x) / len(b_o) * 100 for x in b_o])
+            b_pos_rank = (b_pos_rank - np.min(b_pos_rank)) / (np.ptp(b_pos_rank) + 1e-6)
+            b_pos_rank = (b_pos_rank * 100).astype(int)
+            for idx, i in enumerate(bce_ones):
+                global_pos_rank[i] += b_pos_rank[idx]
+
+        # Priority ranks for negative hints (based on distance to farthest positive)
+        global_neg_rank = np.zeros((num_vars, 1)) + 1
+        if len(pred_zeros_list) > 0 and len(pred_hints) > 0:
+            dist = []
+            for i in pred_zeros_list:
+                max_dist = 0
+                for j in pred_hints:
+                    d = np.linalg.norm(emb[i] - emb[j])
+                    if d > max_dist:
+                        max_dist = d
+                dist.append(max_dist)
+
+            dist = np.array(dist)
+            neg_ranks = np.array([np.sum(dist <= x) / len(dist) * 100 for x in dist])
+            neg_ranks = (neg_ranks - np.min(neg_ranks)) / (np.ptp(neg_ranks) + 1e-6)
+            neg_ranks = (neg_ranks * 100).astype(int)
+            for idx, i in enumerate(pred_zeros_list):
+                global_neg_rank[i] = neg_ranks[idx]
+
+        # Priority ranks for prob-head negatives
+        if len(bce_zeros) > 0:
+            b_z = output[bce_zeros]
+            b_neg_rank = np.array([100 - (np.sum(b_z <= x) / len(b_z) * 100) for x in b_z])
+            b_neg_rank = (b_neg_rank - np.min(b_neg_rank)) / (np.ptp(b_neg_rank) + 1e-6)
+            b_neg_rank = (b_neg_rank * 100).astype(int)
+            for idx, i in enumerate(bce_zeros):
+                global_neg_rank[i] += b_neg_rank[idx]
+
+        # Final hints: variables with 3 votes
+        hint_ones = np.where(final_ones == 3)[0]
+        hint_zeros = np.where(final_zeros == 3)[0]
+        hint_pri_ones = [int(x) for x in global_pos_rank[hint_ones]]
+        hint_pri_zeros = [int(x) for x in global_neg_rank[hint_zeros]]
+
+        return HintInfo(
+            hint_ones=hint_ones,
+            hint_zeros=hint_zeros,
+            hint_pri_ones=hint_pri_ones,
+            hint_pri_zeros=hint_pri_zeros
+        )
 
     @staticmethod
     def _validate_args(train_config_file_path) -> None:
