@@ -1,6 +1,6 @@
 import os
 import pickle
-from typing import Union, NamedTuple
+from typing import Union, NamedTuple, List
 
 import numpy as np
 import scipy.sparse as sp
@@ -23,6 +23,23 @@ class Constants(NamedTuple):
     FORGE_PRE_TRAIN = "pretrain"
     FORGE_FINE_TUNE_INTEGRAL_GAP = "fine_tune_integral_gap"
     FORGE_FINE_TUNE_VARIABLE_PROBA = "fine_tune_variable_proba"
+    FORGE_FINE_TUNE_SAT = "fine_tune_sat"
+
+    # SAT Feature Names
+    SAT_VARIABLE_FEATURES = [
+        "degree",
+        "pos_degree",
+        "neg_degree",
+        "pos_neg_ratio",
+        "pos_deg_norm",
+        "neg_deg_norm"
+    ]
+    SAT_CLAUSE_FEATURES = [
+        "width",
+        "pos_count",
+        "neg_count",
+        "pos_neg_ratio"
+    ]
 
     # Names
     _DATA_DIR_NAME = "data"
@@ -82,6 +99,40 @@ def normalize_adj(adj):
 
 def overwrite_if_given(default_val, val):
     return default_val if val is None else val
+
+
+def get_sat_feature_config(config: dict) -> tuple:
+    """
+    Extract SAT feature configuration from config dict.
+    
+    Returns the selected variable features and clause features lists.
+    If not specified or empty, returns all available features.
+    
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary (from YAML)
+    
+    Returns
+    -------
+    tuple
+        (selected_var_features, selected_clause_features, total_dim)
+        Lists of selected feature names and the total feature dimension
+    """
+    # Get feature selections from config, default to all features if not specified or empty
+    var_features = config.get('sat_variable_features', [])
+    clause_features = config.get('sat_clause_features', [])
+    
+    # If empty or not specified, use all features
+    if not var_features:
+        var_features = Constants.SAT_VARIABLE_FEATURES
+    if not clause_features:
+        clause_features = Constants.SAT_CLAUSE_FEATURES
+    
+    # Calculate total dimension
+    total_dim = len(var_features) + len(clause_features)
+    
+    return var_features, clause_features, total_dim
 
 
 def check_false(expression: bool, exception: Exception) -> None:

@@ -763,7 +763,9 @@ class SATProcessor:
 
     def __init__(self,
                  train_config_file_path: Optional[str] = Constants.default_train_config_yaml,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 selected_var_features: Optional[List[str]] = None,
+                 selected_clause_features: Optional[List[str]] = None):
 
         super().__init__()
 
@@ -773,9 +775,20 @@ class SATProcessor:
 
         # Set input parameters
         self.seed = overwrite_if_given(config.get('seed'), seed)
+        self.config = config
 
         # Set based on input
         self.rng = np.random.default_rng(self.seed)
+        
+        # If feature selections are provided directly, use them; otherwise parse from config
+        if selected_var_features is not None and selected_clause_features is not None:
+            self.selected_var_features = selected_var_features
+            self.selected_clause_features = selected_clause_features
+            self.feature_dim = len(selected_var_features) + len(selected_clause_features)
+        else:
+            # Parse feature selection from config
+            from forge.utils import get_sat_feature_config
+            self.selected_var_features, self.selected_clause_features, self.feature_dim = get_sat_feature_config(config)
 
     def convert_sat_lp_to_satinfo(self,
                                    input_sat_folder: str,
@@ -827,9 +840,13 @@ class SATProcessor:
             for idx in tqdm(range(len(sorted_sat_files))):
                 
                 # Create a local dictionary for this instance
-                idx_to_satinfo_dict = SATProcessor._sat_file_to_satinfo_dict(sorted_sat_files[idx],
-                                                                            self.rng,
-                                                                            max_graph_nodes=max_graph_nodes)
+                idx_to_satinfo_dict = SATProcessor._sat_file_to_satinfo_dict(
+                    sorted_sat_files[idx],
+                    self.rng,
+                    max_graph_nodes=max_graph_nodes,
+                    selected_var_features=self.selected_var_features,
+                    selected_clause_features=self.selected_clause_features
+                )
                 # Add satinfo dict to the global dictionary
                 if idx_to_satinfo_dict:
                     sat_to_satinfo.update(idx_to_satinfo_dict)
@@ -837,7 +854,11 @@ class SATProcessor:
             # Parallel path using multiprocessing with the requested number of workers
             ctx = get_context("spawn")
             with ctx.Pool(processes=num_parallel_workers) as pool:
-                worker = partial(SATProcessor._run_satinfo_worker)
+                worker = partial(
+                    SATProcessor._run_satinfo_worker,
+                    selected_var_features=self.selected_var_features,
+                    selected_clause_features=self.selected_clause_features
+                )
 
                 for result in tqdm(pool.imap_unordered(worker, sorted_sat_files), total=len(sorted_sat_files)):
                     if result:
@@ -848,7 +869,9 @@ class SATProcessor:
         return sat_to_satinfo if has_return else None
 
     @staticmethod
-    def _sat_file_to_satinfo_dict(sat_file: str, rng, max_graph_nodes: Optional[int] = 100000) -> Optional[Dict[str, SATInfo]]:
+    def _sat_file_to_satinfo_dict(sat_file: str, rng, max_graph_nodes: Optional[int] = 100000,
+                                  selected_var_features: List[str] = None,
+                                  selected_clause_features: List[str] = None) -> Optional[Dict[str, SATInfo]]:
         
         print(f"<< Start: Convert to satinfo: {sat_file}")
         
@@ -866,7 +889,11 @@ class SATProcessor:
                 with np.errstate(invalid='raise'):
                     with warnings.catch_warnings():
                         warnings.filterwarnings("error", category=RuntimeWarning)
-                        satinfo = SATProcessor._sat_model_to_satinfo(sat_model)
+                        satinfo = SATProcessor._sat_model_to_satinfo(
+                            sat_model,
+                            selected_var_features=selected_var_features,
+                            selected_clause_features=selected_clause_features
+                        )
             except (FloatingPointError, RuntimeWarning) as e:
                 print(f"Error: Numeric Issue converting SAT {sat_file} to SATInfo: {e}")
                 return None
@@ -891,7 +918,8 @@ class SATProcessor:
         return sat_to_satinfo_local
 
     @staticmethod
-    def _run_satinfo_worker(sat_file: str) -> Optional[Dict[str, SATInfo]]:
+    def _run_satinfo_worker(sat_file: str, selected_var_features: List[str] = None,
+                           selected_clause_features: List[str] = None) -> Optional[Dict[str, SATInfo]]:
 
         """Worker function to compute SATInfo for a single SAT instance.
 
@@ -907,7 +935,11 @@ class SATProcessor:
             temp_rng = np.random.default_rng()
             
             # Create satinfo dict for file
-            idx_to_satinfo_dict = SATProcessor._sat_file_to_satinfo_dict(sat_file, temp_rng)
+            idx_to_satinfo_dict = SATProcessor._sat_file_to_satinfo_dict(
+                sat_file, temp_rng,
+                selected_var_features=selected_var_features,
+                selected_clause_features=selected_clause_features
+            )
 
             # Return local satinfo dict
             return idx_to_satinfo_dict
@@ -917,9 +949,9 @@ class SATProcessor:
             return None
 
     @staticmethod
-    def _sat_model_to_satinfo(sat_model: gp.Model) -> SATInfo:
-        """
-        Convert a Gurobi model (loaded from SAT-converted LP/MPS) into a SATInfo.
+    def _sat_model_to_satinfo(sat_model: gp.Model, selected_var_features: List[str] = None,
+                             selected_clause_features: List[str] = None) -> SATInfo:
+        """Convert a Gurobi model (loaded from SAT-converted LP/MPS) into a SATInfo.
 
         The produced SATInfo contains:
         - `feature_tensor`: node features stacked with clauses (constraints) first then variables.
@@ -932,6 +964,10 @@ class SATProcessor:
         ----------
         sat_model : gp.Model
             The Gurobi model to convert (loaded from SAT LP/MPS file).
+        selected_var_features : List[str], optional
+            Names of variable features to include. If None, includes all.
+        selected_clause_features : List[str], optional
+            Names of clause features to include. If None, includes all.
 
         Returns
         -------
@@ -941,7 +977,11 @@ class SATProcessor:
         """
 
         # Get feature tensor from SAT model (constraints = clauses, variables = variables)
-        feature_tensor, num_clauses, num_vars = SATProcessor._get_sat_feature_tensor_num_clauses_num_vars(sat_model)
+        feature_tensor, num_clauses, num_vars = SATProcessor._get_sat_feature_tensor_num_clauses_num_vars(
+            sat_model,
+            selected_var_features=selected_var_features,
+            selected_clause_features=selected_clause_features
+        )
 
         # Get edge indexes and weights in Tensor, ready for PyG
         edge_index, edge_weight = SATProcessor._get_sat_edge_index_weight(sat_model, num_clauses, num_vars)
@@ -950,7 +990,9 @@ class SATProcessor:
                        edge_index=edge_index, edge_weight=edge_weight)
 
     @staticmethod
-    def _get_sat_feature_tensor_num_clauses_num_vars(sat_model):
+    def _get_sat_feature_tensor_num_clauses_num_vars(sat_model, 
+                                                     selected_var_features=None, 
+                                                     selected_clause_features=None):
         """
         Extract node-level features from a SAT model (loaded from LP/MPS).
 
@@ -959,20 +1001,44 @@ class SATProcessor:
         - Variable features: 6-dim (degree, pos_deg, neg_deg, pos_neg_ratio, pos_deg_norm, neg_deg_norm)
 
         The function produces a feature tensor where rows correspond to nodes:
-            - first `num_clauses` rows are clause features (4-dim, padded to 10-dim),
-            - followed by `num_vars` rows of variable features (6-dim, padded to 10-dim).
+            - first `num_clauses` rows are clause features 
+            - followed by `num_vars` rows of variable features.
+        
+        If selected_var_features or selected_clause_features is provided, only those features
+        are included in the output tensor.
+        
         Features are column-normalized to [0, 1].
 
         Parameters
         ----------
         sat_model : gp.Model
             Gurobi model representing a SAT formula (converted from CNF via sat_to_mip.py).
+        selected_var_features : List[str], optional
+            Names of variable features to include. If None or empty, includes all.
+        selected_clause_features : List[str], optional
+            Names of clause features to include. If None or empty, includes all.
 
         Returns
         -------
         tuple
             (feature_tensor: torch.FloatTensor, num_clauses: int, num_vars: int)
         """
+        
+        # Import here to avoid circular imports
+        from forge.utils import Constants
+        
+        # Default to all features if not specified
+        if not selected_var_features:
+            selected_var_features = Constants.SAT_VARIABLE_FEATURES
+        if not selected_clause_features:
+            selected_clause_features = Constants.SAT_CLAUSE_FEATURES
+        
+        # Get indices of selected features
+        all_var_features = Constants.SAT_VARIABLE_FEATURES
+        all_clause_features = Constants.SAT_CLAUSE_FEATURES
+        
+        var_feature_indices = [all_var_features.index(f) for f in selected_var_features]
+        clause_feature_indices = [all_clause_features.index(f) for f in selected_clause_features]
 
         # Get variables and count them
         variables = sat_model.getVars()
@@ -1075,9 +1141,21 @@ class SATProcessor:
             features_of_clause[c_idx, 2] = neg_count
             features_of_clause[c_idx, 3] = pos_neg_ratio
 
-        # Pad with zeros for equal shapes
-        clause_feat_matrix = np.hstack([features_of_clause, np.zeros((num_clauses, features_of_var.shape[1]))])
-        var_feat_matrix = np.hstack([np.zeros((num_vars, features_of_clause.shape[1])), features_of_var])
+        # Select only requested features (no padding initially)
+        clause_feat_selected = features_of_clause[:, clause_feature_indices]
+        var_feat_selected = features_of_var[:, var_feature_indices]
+
+        # Pad with zeros to make clause and variable features the same width
+        # Clause features go on the left, variable features go on the right
+        num_clause_cols = clause_feat_selected.shape[1]
+        num_var_cols = var_feat_selected.shape[1]
+        total_width = num_clause_cols + num_var_cols
+        
+        # Pad clause features with zeros on the right to reach total_width
+        clause_feat_matrix = np.hstack([clause_feat_selected, np.zeros((clause_feat_selected.shape[0], num_var_cols))])
+        
+        # Pad variable features with zeros on the left to reach total_width
+        var_feat_matrix = np.hstack([np.zeros((var_feat_selected.shape[0], num_clause_cols)), var_feat_selected])
 
         # Stack up into one feature matrix, clauses come first
         feature_matrix = np.vstack([clause_feat_matrix, var_feat_matrix])

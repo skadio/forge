@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.distributed as dist
 import yaml
 from vector_quantize_pytorch import VectorQuantize
 
@@ -328,12 +329,27 @@ class Forge(nn.Module):
 
         self._validate_args(train_config_yaml)
 
+        # Store the config file path for later use (e.g., by SATProcessor)
+        self.train_config_yaml_path: str = train_config_yaml
+
         # Read all configs from the given file
         with open(train_config_yaml, 'r') as f:
             config = yaml.safe_load(f)
 
+        # Compute input_dim from feature selection if not explicitly provided
+        # and if feature selection is configured
+        computed_input_dim = input_dim
+        if computed_input_dim is None and config.get('sat_variable_features') is not None:
+            # Feature selection is configured, compute input_dim from it
+            from forge.utils import get_sat_feature_config
+            _, _, computed_input_dim = get_sat_feature_config(config)
+
+        # Store feature selection for SATProcessor to use later
+        from forge.utils import get_sat_feature_config
+        self.selected_sat_var_features, self.selected_sat_clause_features, _ = get_sat_feature_config(config)
+
         # Default to config values, but overwrite if a value is given
-        self.input_dim: int = overwrite_if_given(config.get('input_dim'), input_dim)
+        self.input_dim: int = overwrite_if_given(config.get('input_dim'), computed_input_dim)
         self.hidden_dim: int = overwrite_if_given(config.get('hidden_dim'), hidden_dim)
         self.codeword_dim: int = overwrite_if_given(config.get('codeword_dim'), codeword_dim)
         self.codebook_size: int = overwrite_if_given(config.get('codebook_size'), codebook_size)
@@ -368,6 +384,11 @@ class Forge(nn.Module):
 
         # Load seed
         self.seed: int = config.get('seed')
+
+        # Load scheduler configuration
+        self.use_cosine_warmup_scheduler: bool = config.get('use_cosine_warmup_scheduler', False)
+        self.warmup_epochs: int = config.get('warmup_epochs', 1)
+        self.min_lr: float = float(config.get('min_lr', 1e-6))
 
         # Initialize without downstream heads. load_model() can set these later.
         self.has_integral_gap_head: bool = False
@@ -587,12 +608,14 @@ class Forge(nn.Module):
         # This is going to be our "embedding" of the input graph
         h_list.append(h)
 
-        # DISABLED (April 2026): Removed L2 normalization to let VQ manage geometry naturally
-        # The forced unit-norm constraint (combined with orthogonal_reg) caused 95% sparsity
-        # Keep cosine_sim: true but let EMA handle norms organically
-        # OLD: h_normalized_for_vq = F.normalize(h, p=2, dim=-1)
-        # NEW: Pass embeddings as-is to VQ
-        h_normalized_for_vq = h
+        # RE-ENABLED (May 2026): L2 normalization before VQ
+        # Previous sparsity issue was likely due to over-constrained orthogonal_reg (1e-5 → 1e-2)
+        # Combined with aggressive commitment_weight. Now using more conservative params:
+        # - vq_decay: 0.99 (slower EMA, more stable)
+        # - commitment_weight: 1.0 (force encoder to track codebook)
+        # - orthogonal_reg_weight: 1e-2 (light repulsion)
+        # L2 normalization ensures unit-norm search space for cosine similarity VQ
+        h_normalized_for_vq = F.normalize(h, p=2, dim=-1)
         
         # The same "embedding" is then passed into the vector quantizer below
         quantized, indices, commit_loss = self.vq(h_normalized_for_vq)
@@ -824,8 +847,9 @@ class Forge(nn.Module):
             size_mismatch_keys = []
             
             for key, value in state_dict.items():
-                # SKIP all VQ-related layers (codebook can have different dimensions between models)
-                if 'vq.' in key or 'codebook' in key or 'project_in' in key or 'project_out' in key:
+                # SKIP all VQ-related layers AND buffers (codebook, EMA buffers can have different dimensions between models)
+                # This includes codebook, embed_avg, cluster_size, and other internal VQ state that can cause size mismatches
+                if 'vq.' in key or 'codebook' in key or 'project_in' in key or 'project_out' in key or 'embed_avg' in key or 'cluster_size' in key:
                     skipped_keys.append(key)
                     continue
                     
@@ -983,8 +1007,35 @@ class Forge(nn.Module):
 
         optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
+        # Setup learning rate scheduler if enabled
+        scheduler = None
+        if self.use_cosine_warmup_scheduler:
+            # Linear warmup for first warmup_epochs, then cosine annealing
+            scheduler1 = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=1e-3,  # Start at very low LR
+                end_factor=1.0,     # Ramp to full LR over warmup_epochs
+                total_iters=self.warmup_epochs
+            )
+            scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=epochs - self.warmup_epochs,  # Cosine for remaining epochs
+                eta_min=self.min_lr  # Minimum LR (cools down)
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[scheduler1, scheduler2],
+                milestones=[self.warmup_epochs]
+            )
+
         # Initialize diagnostics tracker for codebook health monitoring
         diagnostics = VQDiagnostics(self.codebook_size, self.updated_input_dim)
+        
+        # Initialize dead code revival tracker
+        # Track which codes have been used in a rolling window of batches
+        dead_code_window = 20  # Check every 20 batches for dead codes
+        code_usage_window = {}  # Dict of {code_id: count} over recent batches
+        batch_counter = 0
 
         t = ""
         main_loss_list = []
@@ -1072,7 +1123,7 @@ class Forge(nn.Module):
                 for step in range(steps_per_instance):
                     # zero gradients before forward (use set_to_none for speed)
                     optimizer.zero_grad(set_to_none=True)
-
+                    
                     # Compute loss and prediction
                     h_list, logits, loss, indices, codebook_ = self.forward(features,
                                                                             num_cons_or_clauses, mipinfo.num_vars,
@@ -1085,43 +1136,83 @@ class Forge(nn.Module):
                         # FIX: Track the quantized embedding (unit-norm from codebook) not the pre-normalized h
                         stats = diagnostics.track_batch(indices, h_list[1], torch.tensor(loss_scalar))
                         
+                        # Keep diagnostics aligned with runtime codebook size in case VQ internals change.
+                        runtime_codebook_size = int(self.vq.codebook.data.shape[0])
+                        if diagnostics.codebook_size != runtime_codebook_size:
+                            diagnostics.codebook_size = runtime_codebook_size
+
                         # Log utilization at start and end of instance
                         if step == 0 or step == steps_per_instance - 1:
                             if idx % 50 == 0:
-                                print(f"    Step {step}/{steps_per_instance}: Codes {stats['codes_used_recent']}/{self.codebook_size} "
+                                print(f"    Step {step}/{steps_per_instance}: Codes {stats['codes_used_recent']}/{runtime_codebook_size} "
                                       f"({stats['utilization_pct_recent']:.1f}%), Concentration {stats['top_3_concentration']:.0f}%, "
                                       f"Perplexity {stats['perplexity']:.1f}")
+                        
+                        # RANDOM RESTARTS: Revive dead codes by re-initializing them
+                        # Track code usage in a rolling window, periodically reset unused codes
+                        batch_counter += 1
+                        
+                        # Count which codes were used in this batch
+                        indices_np = indices.detach().cpu().numpy().flatten()
+                        codes_used_this_batch = set(indices_np)
+                        
+                        # Update rolling window of code usage
+                        for code_id in codes_used_this_batch:
+                            if code_id not in code_usage_window:
+                                code_usage_window[code_id] = 0
+                            code_usage_window[code_id] += 1
+                        
+                        # Every N batches, check for and revive dead codes
+                        if batch_counter % dead_code_window == 0:
+                            # SYNCHRONIZE code usage across all GPUs in distributed training
+                            # This ensures dead code detection is consistent across all processes
+                            if dist.is_available() and dist.is_initialized():
+                                # Convert dict to tensor for all_reduce
+                                usage_tensor = torch.zeros(self.codebook_size, device=self.device, dtype=torch.float32)
+                                for code_id, count in code_usage_window.items():
+                                    usage_tensor[code_id] = float(count)
+                                
+                                # Sum usage counts across all GPUs
+                                dist.all_reduce(usage_tensor, op=dist.ReduceOp.SUM)
+                                
+                                # Convert back to dict
+                                code_usage_window.clear()
+                                for code_id in range(self.codebook_size):
+                                    count = usage_tensor[code_id].item()
+                                    if count > 0:
+                                        code_usage_window[code_id] = int(count)
+                            
+                            dead_codes = []
+                            for code_id in range(self.codebook_size):
+                                if code_usage_window.get(code_id, 0) == 0:
+                                    dead_codes.append(code_id)
+                            
+                            # If we found dead codes, revive them
+                            if len(dead_codes) > 0:
+                                # Get encoder outputs (pre-VQ embeddings) from current batch
+                                h_encoder = h_list[0]  # [num_nodes, hidden_dim], unit-norm L2 normalized
+                                
+                                # Randomly select num_dead_code encoder outputs to reinitialize dead codes
+                                if len(h_encoder) > 0:
+                                    num_dead = len(dead_codes)
+                                    random_indices = torch.randperm(len(h_encoder), device=h_encoder.device)[:num_dead]
+                                    random_encodings = h_encoder[random_indices]  # [num_dead, hidden_dim]
+                                    
+                                    # Update VQ codebook with revived codes
+                                    for i, code_id in enumerate(dead_codes):
+                                        self.vq.codebook.data[code_id] = random_encodings[i]
+                                    
+                                    if idx % 50 == 0:
+                                        print(f"    [DEAD CODE REVIVAL] Revived {len(dead_codes)} codes with random encoder outputs @ batch {batch_counter}")
+                            
+                            # Reset rolling window for next check window
+                            code_usage_window.clear()
                     
                     instance_loss_list.append(loss.item())
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                     optimizer.step()
-
-                    # REMOVED (April 2026): Disabled post-normalization to allow VQ to manage norms naturally
-                    # This was causing 95%+ sparsity due to normalization conflicts:
-                    # - Unit norm constraint: ||code_i||_2 = 1.0 (for all 1024 codes)
-                    # - Orthogonal constraint: code_i · code_j = 0 (for all i ≠ j)  
-                    # - But only 256 dimensions available → impossible to satisfy simultaneously
-                    # Result: codes clustered in low-dim subspace with most dims = 0
-                    # 
-                    # OLD CODE (DISABLED):
-                    # with torch.no_grad():
-                    #     # 1. Normalize the visible codebook parameter
-                    #     norm_vec = F.normalize(self.vq.codebook.data, p=2, dim=-1)
-                    #     self.vq.codebook.copy_(norm_vec)
-                    #     
-                    #     # 2. Sync the internal EMA buffers to maintain consistency
-                    #     if hasattr(self.vq, 'embed_avg') and self.vq.embed_avg is not None:
-                    #         self.vq.embed_avg.copy_(norm_vec * self.vq.cluster_size.unsqueeze(-1))
-                    #     
-                    #     # DEBUG: Verify codebook is actually normalized
-                    #     if step == 0 and idx % 20 == 0:
-                    #         cb_norms = torch.norm(self.vq.codebook.data, p=2, dim=-1)
-                    #         cb_mean_norm = cb_norms.mean().item()
-                    #         cb_max_norm = cb_norms.max().item()
-                    #         if cb_mean_norm > 1.01 or cb_mean_norm < 0.99:
-                    #             print(f"    WARNING: Codebook norm drift detected! mean={cb_mean_norm:.6f}, max={cb_max_norm:.6f}")
-
+                    
                     # explicitly delete large temporaries to free memory faster
                     del h_list, logits, loss, indices, codebook_
 
@@ -1178,6 +1269,14 @@ class Forge(nn.Module):
                 print(diag_report)
                 t += diag_report + "\n"
                 diagnostics.reset()  # Reset for next epoch
+            
+            # Step learning rate scheduler if enabled
+            if scheduler is not None:
+                current_lr = optimizer.param_groups[0]['lr']
+                scheduler.step()
+                new_lr = optimizer.param_groups[0]['lr']
+                if rank == 0:
+                    print(f"  [LR SCHEDULER] LR updated: {current_lr:.2e} → {new_lr:.2e}")
 
 
             # Save epoch checkpoint
@@ -1585,7 +1684,13 @@ class Forge(nn.Module):
 
         # Convert model to appropriate info object
         if is_sat_model:
-            info = SATProcessor._sat_model_to_satinfo(mip_model)
+            # Pass feature selection to ensure correct dimensions
+            # For older models without these attributes, None will use defaults
+            info = SATProcessor._sat_model_to_satinfo(
+                mip_model,
+                selected_var_features=getattr(self, 'selected_sat_var_features', None),
+                selected_clause_features=getattr(self, 'selected_sat_clause_features', None)
+            )
             embedding_class = SATEmbeddings
             print("Detected SAT model", flush=True)
         else:
@@ -1593,10 +1698,22 @@ class Forge(nn.Module):
             embedding_class = MIPEmbeddings
             print("Detected MIP model", flush=True)
 
+        # Validate feature tensor dimensions
+        if info.feature_tensor is None:
+            raise ValueError(f"Error: feature_tensor is None for model with {info.num_clauses if hasattr(info, 'num_clauses') else info.num_cons} constraints/clauses and {info.num_vars} variables")
+        
+        expected_feature_dim = self.input_dim
+        actual_feature_dim = info.feature_tensor.shape[1] if info.feature_tensor.dim() == 2 else info.feature_tensor.shape[0]
+        
+        if actual_feature_dim != expected_feature_dim:
+            raise ValueError(f"Error: Feature dimension mismatch. Expected {expected_feature_dim}, got {actual_feature_dim}. "
+                           f"Feature tensor shape: {info.feature_tensor.shape}, "
+                           f"Model has {info.num_clauses if hasattr(info, 'num_clauses') else info.num_cons} clauses and {info.num_vars} variables")
+
         # Forward pass through trained Forge
         with torch.no_grad():
             h_list, logits, loss, indices, codebook_ = self.forward(info.feature_tensor.to(self.device),
-                                                                info.num_cons, info.num_vars,
+                                                                info.num_cons if hasattr(info, 'num_cons') else info.num_clauses, info.num_vars,
                                                                 info.edge_index.to(self.device),
                                                                 info.edge_weight.to(self.device))
         # Restore original mode

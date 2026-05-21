@@ -12,7 +12,7 @@ from forge.embeddings import Forge
 from forge.labeler import MIPLabeler, GapInfo, SATLabeler, SATSatisfiabilityInfo
 from forge.processor import (MIPProcessor, _MIPUtils, MIPEmbeddings, MIPInfo,
                              SATProcessor, _SATUtils, SATEmbeddings, SATInfo)
-from forge.utils import check_true, save_pickle, load_pickle
+from forge.utils import check_true, save_pickle, load_pickle, Constants
 
 
 def finetune_integral_gap(forge: Forge,
@@ -811,8 +811,12 @@ def sat_pretrain(forge: Forge,
     else:
         forge_module = forge
 
-    # SAT processor
-    sat_processor = SATProcessor(seed=forge_module.seed)
+    # SAT processor - use feature selection from the Forge model to ensure consistency
+    sat_processor = SATProcessor(
+        seed=forge_module.seed,
+        selected_var_features=getattr(forge_module, 'selected_sat_var_features', None),
+        selected_clause_features=getattr(forge_module, 'selected_sat_clause_features', None)
+    )
 
     # Use existing sat_to_satinfo if given, or generate it
     if input_sat_to_satinfo_pkl:
@@ -845,6 +849,44 @@ def sat_pretrain(forge: Forge,
     except Exception as e:
         print(f"ERROR: Rank {rank} failed to load pickle: {e}", flush=True)
         raise
+    
+    # Adjust feature dimensions if needed (backward compatibility with older SATInfo pickles)
+    # If loaded SATInfo has more features than the model expects, subset to selected features
+    if satinfo_list:
+        expected_input_dim = forge_module.input_dim
+        actual_feature_dim = satinfo_list[0].feature_tensor.shape[1]
+        
+        if actual_feature_dim != expected_input_dim:
+            if rank == 0:
+                print(f"Rank {rank}: Feature dimension mismatch detected!")
+                print(f"  Expected: {expected_input_dim}, Actual: {actual_feature_dim}")
+                print(f"  Adjusting SATInfo features to match expected dimensions...")
+            
+            # If actual is 10 dims (defaults) and we need fewer, extract only selected indices
+            if actual_feature_dim == 10 and expected_input_dim < 10:
+                # Map selected features to indices in the full 10-dim feature set
+                from forge.utils import Constants
+                all_var_features = Constants.SAT_VARIABLE_FEATURES  # 6 dims
+                all_clause_features = Constants.SAT_CLAUSE_FEATURES  # 4 dims
+                
+                selected_var_features = getattr(forge_module, 'selected_sat_var_features', all_var_features)
+                selected_clause_features = getattr(forge_module, 'selected_sat_clause_features', all_clause_features)
+                
+                # Get indices of selected features within the full set
+                var_indices = [all_var_features.index(f) for f in selected_var_features]
+                clause_indices = [len(all_var_features) + all_clause_features.index(f) for f in selected_clause_features]
+                selected_indices = var_indices + clause_indices
+                
+                # Apply to all SATInfo objects
+                for info in satinfo_list:
+                    info.feature_tensor = info.feature_tensor[:, selected_indices]
+                
+                if rank == 0:
+                    print(f"Rank {rank}: Subset {actual_feature_dim} -> {expected_input_dim} features for all {len(satinfo_list)} instances")
+            else:
+                if rank == 0:
+                    print(f"Rank {rank}: WARNING - Cannot auto-adjust features from {actual_feature_dim} to {expected_input_dim} dims")
+
     
     # CRITICAL: Filter by max_graph_nodes BEFORE partitioning
     # This ensures balanced load across ranks
@@ -1029,8 +1071,12 @@ def sat_to_satinfo(forge: Forge,
     import torch.nn as nn
     forge_module = forge.module if isinstance(forge, nn.DataParallel) else forge
 
-    # SAT processor
-    sat_processor = SATProcessor(seed=forge_module.seed)
+    # SAT processor - use feature selection from the Forge model to ensure consistency
+    sat_processor = SATProcessor(
+        seed=forge_module.seed,
+        selected_var_features=getattr(forge_module, 'selected_sat_var_features', None),
+        selected_clause_features=getattr(forge_module, 'selected_sat_clause_features', None)
+    )
 
     check_true(os.path.isdir(input_sat_folder),
                ValueError("Error: invalid `input_sat_folder` input_sat_folder={input_sat_folder!r}."))
@@ -1098,8 +1144,12 @@ def sat_to_embeddings(forge: Forge,
     # Extract underlying module if wrapped with DataParallel
     forge_module = forge.module if isinstance(forge, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else forge
 
-    # SAT processor
-    sat_processor = SATProcessor(seed=forge_module.seed)
+    # SAT processor - use feature selection from the Forge model to ensure consistency
+    sat_processor = SATProcessor(
+        seed=forge_module.seed,
+        selected_var_features=getattr(forge_module, 'selected_sat_var_features', None),
+        selected_clause_features=getattr(forge_module, 'selected_sat_clause_features', None)
+    )
 
     # Get list of SAT files
     sat_files = _SATUtils.get_only_sat_files(input_sat_folder, input_sat_instances_file, is_sort_by_size=False)
@@ -1266,8 +1316,12 @@ def mixed_pretrain(forge: Forge,
     # MIP processor
     mip_processor = MIPProcessor(seed=forge_module.seed)
     
-    # SAT processor
-    sat_processor = SATProcessor(seed=forge_module.seed)
+    # SAT processor - use feature selection from the Forge model to ensure consistency
+    sat_processor = SATProcessor(
+        seed=forge_module.seed,
+        selected_var_features=getattr(forge_module, 'selected_sat_var_features', None),
+        selected_clause_features=getattr(forge_module, 'selected_sat_clause_features', None)
+    )
 
     # Load or generate MIPInfo
     if input_mip_to_mipinfo_pkl:
