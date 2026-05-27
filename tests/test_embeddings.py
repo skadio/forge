@@ -1,6 +1,6 @@
 from forge.embeddings import Forge, MIPEmbeddings
 from forge.pipeline import mip_to_embeddings
-from forge.utils import Constants, load_mip_embeddings_hdf5, _safe_group_name
+from forge.utils import Constants
 from tests.test_base import BaseTest
 
 
