@@ -54,7 +54,7 @@ def run():
 
     forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 
-    config="iclr_forge_pretrain"
+    config="forge_pretrain"
     pretrain(forge=forge,
              input_mip_folder="/root/data/instances/",
              input_mip_instances_file=f"/root/data/configs/{config}.txt",

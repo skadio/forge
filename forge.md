@@ -246,8 +246,8 @@ print(f"Raw size: {total_elements * 4 / 1024**2:.1f} MiB")
    python -m scripts.mip_to_mipinfo 
    --train_config_yaml ./forge/configs/train_config.yaml 
    --input_mip_folder ../instances/ 
-   --input_mip_instances_file ./data/configs/iclr_pretrain_clusters.txt
-   --output_mip_to_mipinfo_pkl ./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl 
+   --input_mip_instances_file ./data/configs/pretrain_clusters.txt
+   --output_mip_to_mipinfo_pkl ./models/pretrain_clusters_mip_to_mipinfo.pkl 
    --num_parallel_workers 4
    ```
 2. Move output_mip_to_mipinfo_pkl to Modal "models" volume using:

@@ -226,3 +226,9 @@ data/instances/
 
 # Ignore macOS system files
 .DS_Store
+
+# MIPFeas clustering
+cluster.py
+data/mipfeas/*
+results_mipfeas_cluster
+mipfeas_mip_to_embeddings_from_iclr_forge_pretrain_trained.pkl

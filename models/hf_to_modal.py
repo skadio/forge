@@ -3,7 +3,7 @@ import modal
 from huggingface_hub import hf_hub_url
 import requests
 
-filename = "iclr_pretrain_clusters_mip_to_mipinfo.pkl"
+filename = "pretrain_clusters_mip_to_mipinfo.pkl"
 app = modal.App("download_hf_into_volume")
 models_volume = modal.Volume.from_name("models")
 image = modal.Image.debian_slim().pip_install("huggingface-hub", "requests")
