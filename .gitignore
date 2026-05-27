@@ -236,4 +236,4 @@ data/mipfeas/*
 cluster.py
 
 results_mipfeas_cluster
-mipfeas_mip_to_embeddings_from_iclr_forge_pretrain_trained.pkl
+mipfeas_mip_to_embeddings_from_forge_pretrain_trained.pkl
