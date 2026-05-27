@@ -217,18 +217,23 @@ __marimo__/
 /models/*.pkl
 /models/*.hdf5
 /models/*.log
+/models/skipped.txt
+/models/test_clusters.png
+/models/test_clusters_from_forge_pretrained.png
 
 # Ignore data
 *data.zip
 *instances.zip
+*mipfeas.zip
 data/all_mip_data/
 data/instances/
+data/mipfeas/*
 
 # Ignore macOS system files
 .DS_Store
 
 # MIPFeas clustering
 cluster.py
-data/mipfeas/*
+
 results_mipfeas_cluster
 mipfeas_mip_to_embeddings_from_iclr_forge_pretrain_trained.pkl
