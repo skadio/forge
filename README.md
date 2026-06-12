@@ -181,6 +181,9 @@ $ python -m unittest discover tests
 ## Support
 Please submit bug reports and feature requests as [Issues](https://github.com/skadio/forge/issues).
 
+## Acknowledgments
+We would like to thank [Modal](https://modal.com/) for their generous support through the provision of academic credits and computational infrastructure, which were instrumental in training the Forge model used in this research.
+
 ## License
 Forge is licensed under the [Apache License 2.0](LICENSE).
 
