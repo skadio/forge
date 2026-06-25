@@ -753,6 +753,18 @@
       <a href="https://huggingface.co/skadio/forge" class="btn btn-outline" target="_blank"><span style="font-size:1rem; line-height:1;">🤗</span> Models</a>
       <a href="https://huggingface.co/datasets/skadio/forge" class="btn btn-outline" target="_blank"><i class="fa-solid fa-database" style="color: #2471a3;"></i> Dataset</a>
       <a href="https://huggingface.co/spaces/skadio/forge" class="btn btn-outline" target="_blank"><i class="fa-solid fa-rocket" style="color: #16a085;"></i> Demo</a>
+      <button class="btn btn-outline" onclick="toggleBibtexById('bibtex-hero')"><i class="fa-solid fa-chevron-down"></i> BibTeX</button>
+    </div>
+    <div class="bibtex-inline" id="bibtex-hero" style="max-width: 640px; margin: 1.5rem auto 0; text-align: left;">
+      <button class="copy-btn" onclick="copyBibtexInline(this)">Copy</button>
+      <pre>@misc{forge2026,
+      title={FORGE: Foundational Optimization Representations from Graph Embeddings},
+      author={Zohair Shafi and Serdar Kadioglu},
+      journal={Transactions on Machine Learning Research},
+      issn={2835-8856},
+      year={2026},
+      url={https://openreview.net/forum?id=7Uo1yRWUpo},
+}</pre>
     </div>
   </div>
 </header>
@@ -984,6 +996,18 @@ function toggleBibtex(btn) {
   btn.classList.toggle('active');
   const bibtexDiv = btn.closest('.card-links').nextElementSibling;
   bibtexDiv.classList.toggle('active');
+}
+
+function toggleBibtexById(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('active');
+  // Find the button that triggered this
+  document.querySelectorAll('.bibtex-toggle').forEach(btn => {
+    if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(id)) {
+      btn.classList.toggle('active');
+    }
+  });
 }
 
 function copyBibtexInline(btn) {
