@@ -38,13 +38,15 @@ Without an HF token with approved access, the load from Hugging Face will fail.
 
 ## Available Functionality
 
-| Functionality | Description                                                                                     |
-| --- |-------------------------------------------------------------------------------------------------|
-| [Generate MIP Info](#generate-mip-info) | Build and serialize MIPInfo objects from raw MIP instances for reuse in downstream pre-training. |
-| [Pre-Train Embeddings](#pre-train-embeddings) | Pre-train Forge on MIP instances and their MIPInfo and save a pretrained model checkpoint.      |
-| [Generate Embeddings](#generate-embeddings) | Generate per-instance embeddings from a pretrained Forge model.                                 |
-| [Fine-Tune Integral Gap](#fine-tune-integral-gap) | Fine-tune Forge for integral-gap prediction on labeled data.                                    |
-| [Predict Integral Gap](#predict-integral-gap) | Run inference with a fine-tuned model to predict LP/MIP gap information.                        |
+| Functionality                                                             | Description                                                                                      |
+|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| [Generate MIP Info](#generate-mip-info)                                   | Build and serialize MIPInfo objects from raw MIP instances for reuse in downstream pre-training. |
+| [Pre-Train Forge](#pre-train-embeddings)                                  | Pre-train Forge on MIP instances and their MIPInfo and save a pretrained model checkpoint.       |
+| [Generate Embeddings](#generate-embeddings)                               | Generate per-instance embeddings from a pretrained Forge model.                                  |
+| [Fine-Tune Integral Gap](#fine-tune-integral-gap)                         | Fine-tune Forge for integral-gap prediction on labeled GapInfo data.                             |
+| [Predict Integral Gap](#predict-integral-gap)                             | Run inference with a fine-tuned model to predict LP/MIP gap information (GapInfo).               |
+| [Fine-Tune Variable Probabilities](#fine-tune-variable-probabilities)      | Fine-tune Forge for variable 0/1 probability prediction on labeled TripletInfo data.             |
+| [Predict Integral Gap](#predict-integral-gap)                             | Run inference with a fine-tuned model to predict variable 0/1 probabilities (HintInfo).          |
 
 ## Generate MIP Info
 
