@@ -4,6 +4,7 @@ from forge.embeddings import Forge
 from forge.pipeline import mip_to_hint
 from forge.utils import Constants
 
+
 if __name__ == "__main__":
     # Parameters
     parser = argparse.ArgumentParser()

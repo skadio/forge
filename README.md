@@ -1,34 +1,5 @@
 # Forge: Foundational Optimization Embeddings From Graph Embeddings
-Forge is a research library designed for representational learning in combinatorial problems.
-
-## Dataset Setup 
-1. instances.zip is in Hugging Face: https://huggingface.co/datasets/skadio/forge
-2. Use data/hf_to_local.py to download and unzip instances to a local instances/ folder 
-3. Keep instances/ and git_forge/ folders in the same parent directory
-4. For local, if instances are inside git_forge/ it slows down IDE indexing and searching
-
-## Steps
-1. Generate mip_to_mipinfo.pkl from MIP instances.
-   1. Select which dataset to use in input_mip_instances_file
-   2. Decide whether to use --relexation_list 0.05 0.01
-   3. Num workers can be adjusted based on CPU cores and RAM
-   4. This generates the output_mip_to_mipinfo_pkl
-   5. Be careful about memory usage when using many workers and many MIP instances (500+)
-   ```
-   python -m scripts.mip_to_mipinfo 
-   --train_config_yaml ./forge/configs/train_config.yaml 
-   --input_mip_folder ../instances/ 
-   --input_mip_instances_file ./data/configs/iclr_pretrain_clusters.txt
-   --output_mip_to_mipinfo_pkl ./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl 
-   --num_parallel_workers 4
-   ```
-2. Move output_mip_to_mipinfo_pkl to Modal "models" volume using:
-   1. Move to HF first using local_to_hf.py
-   2. Then download to Modal models volume using hf_to_modal.py
-   3. Need to use HF as intermary storage for moving large files to Modal
-   4. local_to_modal.py will fail for large files/
-3. Pre-train Forge embeddings using output_mip_to_mipinfo_pkl
-4. Generate mip_to_embeddings.pkl using the pre-trained Forge model
+[Forge](https://skadio.github.io/forge/) is a research library designed for representational learning in combinatorial optimization. It provides tools for generating embeddings from MIP instances, pre-training models on these embeddings, and fine-tuning them for specific tasks such as predicting integral gap, search guidance, backdoor prediction, and solver configuration.
 
 ## Generate MIP Info
 
@@ -88,7 +59,7 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 pretrain(forge=forge,
          input_mip_folder="./data/instances/",
          input_mip_instances_file="data/configs/all.txt",
-         output_mip_to_mipinfo_pkl="./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl",
+          output_mip_to_mipinfo_pkl="./models/pretrain_clusters_mip_to_mipinfo.pkl",
          output_forge_pretrained_pkl="./models/forge_pretrained.pkl",
          output_log_file="./models/forge_pretrained.log")
 ```
@@ -96,7 +67,7 @@ pretrain(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/all.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/iclr_pretrain_clusters_mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
+python -m scripts.pretrain --train_config_yaml ./forge/configs/train_config.yaml --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/all.txt --relaxation_list 0.05 0.01 --output_mip_to_mipinfo_pkl ./models/pretrain_clusters_mip_to_mipinfo.pkl --output_forge_pretrained_pkl ./models/forge_pretrained.pkl --output_log_file ./models/forge_pretrained.log
 ```
 
 ## Generate Embeddings
@@ -189,7 +160,15 @@ python -m forge.scripts.mip_to_gapinfo --train_config_yaml ./forge/configs/train
 ```
 
 ## Installation
-Forge requires **Python 3.10** and can be installed via `pip install forge`. 
+Forge requires **Python 3.12** and can be installed via `pip install forge-mip`. 
+
+```
+# Generate mip embeddings from Hugging Face Forge model 
+forge --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_pretrain.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
+
+# Generate mip embeddings from local pretrained Forge model 
+forge --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_pretrain.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
+```
 
 ### Installation from Source Code
 ```
@@ -209,6 +188,9 @@ $ python -m unittest discover tests
 
 ## Support
 Please submit bug reports and feature requests as [Issues](https://github.com/skadio/forge/issues).
+
+## Acknowledgments
+We would like to thank [Modal](https://modal.com/) for their generous support through the provision of academic credits and computational infrastructure, which were instrumental in training the Forge model used in this research.
 
 ## License
 Forge is licensed under the [Apache License 2.0](LICENSE).

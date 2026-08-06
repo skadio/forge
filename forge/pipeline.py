@@ -175,15 +175,13 @@ def finetune_variable_proba(forge: Forge,
                               "or a valid `input_mip_folder` must be specified to generate it."))
 
         labeler = MIPLabeler()
-        mip_to_tripletinfo = labeler.convert_mip_to_tripletinfo(
-            input_mip_folder=input_mip_folder,
-            input_mip_instances_file=input_mip_instances_file,
-            output_mip_to_tripletinfo_pkl=output_mip_to_tripletinfo_pkl,
-            forge_model=forge,
-            triplet_time_limit=triplet_time_limit,
-            triplet_num_solutions=triplet_num_solutions,
-            has_return=True
-        )
+        mip_to_tripletinfo = labeler.convert_mip_to_tripletinfo(input_mip_folder=input_mip_folder,
+                                                                input_mip_instances_file=input_mip_instances_file,
+                                                                output_mip_to_tripletinfo_pkl=output_mip_to_tripletinfo_pkl,
+                                                                forge_model=forge,
+                                                                triplet_time_limit=triplet_time_limit,
+                                                                triplet_num_solutions=triplet_num_solutions,
+                                                                has_return=True)
 
     # Fine-tune the Forge model
     forge._finetune_variable_proba(input_mip_to_tripletinfo=mip_to_tripletinfo,

@@ -50,8 +50,10 @@ class HintInfo:
     hint_zeros : np.ndarray
         Variable indices to hint as 0.
     hint_pri_ones : list[int]
+        Same size as hint_ones, indices are in sync
         Priority ranks for the 1-hints (higher = more confident).
     hint_pri_zeros : list[int]
+        Same size as hint_zeros, indices are in sync
         Priority ranks for the 0-hints (higher = more confident).
     """
 
@@ -74,7 +76,7 @@ class MIPLabeler:
                                gapinfo_time_limit: int = 120,
                                gurobi_num_threads: int = 1,
                                num_parallel_workers: int = 1,
-                               has_return=False) -> Dict[str, GapInfo]:
+                               has_return: bool = False) -> Dict[str, GapInfo]:
 
         # Normalize num_parallel_workers
         if num_parallel_workers is None or num_parallel_workers < 1:
@@ -244,9 +246,7 @@ class MIPLabeler:
         gurobi_env = _MIPUtils.start_gurobi_env()
 
         for mip_file in tqdm(mip_files):
-            result = MIPLabeler._mip_file_to_tripletinfo(
-                mip_file, forge_model, gurobi_env, triplet_time_limit, triplet_num_solutions
-            )
+            result = MIPLabeler._mip_file_to_tripletinfo(mip_file, forge_model, gurobi_env, triplet_time_limit, triplet_num_solutions)
             if result is not None:
                 mip_to_tripletinfo[mip_file] = result
 
@@ -294,6 +294,8 @@ class MIPLabeler:
             num_vars = mipinfo.num_vars
 
             # Continuous and quantized variable embeddings
+            # emb is GNN of variables
+            # quantized_emb is the codemap of the codebook of the variable
             emb = h_list[0][num_cons:].detach().cpu().numpy()
             quantized_emb = h_list[1][num_cons:].detach().cpu().numpy()
 

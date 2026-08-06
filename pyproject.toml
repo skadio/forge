@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "forge"
+name = "forge-mip"
 description = "Forge: Foundational Optimization Representation from Graph Embeddings"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [
     {name = "skadio"},
@@ -31,6 +31,9 @@ dependencies = [
     "vector-quantize-pytorch"
 ]
 dynamic = ["version"]
+
+[project.scripts]
+forge = "scripts.mip_to_embeddings:main"
 
 [project.urls]
 Documentation = "https://github.com/skadio/forge"

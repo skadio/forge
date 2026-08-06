@@ -813,94 +813,6 @@ class Forge(nn.Module):
         # Close Gurobi environment
         gurobi_env.close()
 
-    def _mip_model_to_gapinfo(self, mip_model: gp.Model, problem_type: str) -> GapInfo:
-        """
-        Predict integral gap information for a Gurobi model.
-
-        Process
-        -------
-        - Convert `mip_model` to `MIPInfo`.
-        - Run `forward()` in eval mode.
-        - Extract `integral_gap` head outputs (variable-level scores) and aggregate to a gap ratio.
-        - Solve LP relaxation to obtain `lp_obj` and `lp_sol`, then compute `mip_obj` based on the predicted ratio.
-
-        Parameters
-        ----------
-        mip_model : gurobipy.Model
-            An already-loaded Gurobi model object.
-        problem_type : str
-            Problem-specific post-processing rules for `mip_obj` computation.
-
-        Returns
-        -------
-        GapInfo
-            Dataclass containing: lp_obj, lp_sol, mip_obj, mip_sol, gap_ratio
-            The lp_obj and lp_sol are true values from solving the LP relaxation.n.
-            The mip_obj is predicted using the gap ratio prediction from Forge.
-            The mip_sol is set to None.
-
-        Raises
-        ------
-        TypeError
-            If `mip_model` is not a gurobipy.Model.
-        """
-        # Validate input type
-        if not isinstance(mip_model, gp.Model):
-            raise TypeError(f"Error: mip_model must be a gurobipy.model, got {type(mip_model).__name__}")
-
-        # If not trained, warn (keeps previous behavior)
-        if not self.is_trained:
-            raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
-
-        # Ensure module is in evaluation mode and on device
-        self.eval()
-
-        # Store Forge eval mode (to restore back) and set to eval only to generate embedding
-        original_mode = self.is_eval_mode
-        self.is_eval_mode = True
-
-        # Convert MIP model to MIP info with feature tensor and PyG edge_index/edge_weight
-        mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
-
-        # Forward pass through trained Forge
-        h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
-                                                                mipinfo.num_cons, mipinfo.num_vars,
-                                                                mipinfo.edge_index.to(self.device),
-                                                                mipinfo.edge_weight.to(self.device))
-        # Restore original mode
-        self.is_eval_mode = original_mode
-
-        # Find LP optimal to calculate ratio
-        # variable_proba = h_list[-2][mipinfo.num_cons:]
-        integral_gap = h_list[-1][mipinfo.num_cons:]
-
-        gap_ratio = torch.mean(integral_gap).item()
-
-        # Read and solve the LP relaxation to generate initial objective value
-        lp_model = mip_model.relax()
-        lp_model.optimize()
-        lp_obj = lp_model.ObjVal
-        lp_sol = lp_model.Xn
-
-        mip_obj = lp_obj
-        # TODO: Try to replace with GRB.SENSE instead of Constants.MIN_PROBLEMS/MAX_PROBLEMS
-        if problem_type in Constants.MIN_PROBLEMS:
-            # Minimization: interpret gap_ratio as “how close MIP is to LP”
-            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
-            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
-        elif problem_type in Constants.MAX_PROBLEMS:
-            # Maximization: interpret gap_ratio as mip_obj / lp_obj in (0, 1]
-            # Small safety margin to the ratio to make sure we are not infeasible
-            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
-            mip_obj = lp_obj * gap_ratio
-        else:
-            raise ValueError(f"Error: Unknown problem type '{problem_type}' for mip_model_to_gapinfo")
-
-        # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
-        gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
-
-        return gap_info
-
     def _finetune_variable_proba(self,
                                  input_mip_to_tripletinfo: Dict[str, TripletInfo],
                                  output_forge_finetuned_pkl: str,
@@ -1044,6 +956,95 @@ class Forge(nn.Module):
             np.random.shuffle(mips)
 
         gurobi_env.close()
+
+
+    def _mip_model_to_gapinfo(self, mip_model: gp.Model, problem_type: str) -> GapInfo:
+        """
+        Predict integral gap information for a Gurobi model.
+
+        Process
+        -------
+        - Convert `mip_model` to `MIPInfo`.
+        - Run `forward()` in eval mode.
+        - Extract `integral_gap` head outputs (variable-level scores) and aggregate to a gap ratio.
+        - Solve LP relaxation to obtain `lp_obj` and `lp_sol`, then compute `mip_obj` based on the predicted ratio.
+
+        Parameters
+        ----------
+        mip_model : gurobipy.Model
+            An already-loaded Gurobi model object.
+        problem_type : str
+            Problem-specific post-processing rules for `mip_obj` computation.
+
+        Returns
+        -------
+        GapInfo
+            Dataclass containing: lp_obj, lp_sol, mip_obj, mip_sol, gap_ratio
+            The lp_obj and lp_sol are true values from solving the LP relaxation.n.
+            The mip_obj is predicted using the gap ratio prediction from Forge.
+            The mip_sol is set to None.
+
+        Raises
+        ------
+        TypeError
+            If `mip_model` is not a gurobipy.Model.
+        """
+        # Validate input type
+        if not isinstance(mip_model, gp.Model):
+            raise TypeError(f"Error: mip_model must be a gurobipy.model, got {type(mip_model).__name__}")
+
+        # If not trained, warn (keeps previous behavior)
+        if not self.is_trained:
+            raise ValueError("Error: Forge is not trained and no pre-trained model path is given.")
+
+        # Ensure module is in evaluation mode and on device
+        self.eval()
+
+        # Store Forge eval mode (to restore back) and set to eval only to generate embedding
+        original_mode = self.is_eval_mode
+        self.is_eval_mode = True
+
+        # Convert MIP model to MIP info with feature tensor and PyG edge_index/edge_weight
+        mipinfo = MIPProcessor._mip_model_to_mipinfo(mip_model)
+
+        # Forward pass through trained Forge
+        h_list, logits, loss, indices, codebook_ = self.forward(mipinfo.feature_tensor.to(self.device),
+                                                                mipinfo.num_cons, mipinfo.num_vars,
+                                                                mipinfo.edge_index.to(self.device),
+                                                                mipinfo.edge_weight.to(self.device))
+        # Restore original mode
+        self.is_eval_mode = original_mode
+
+        # Find LP optimal to calculate ratio
+        # variable_proba = h_list[-2][mipinfo.num_cons:]
+        integral_gap = h_list[-1][mipinfo.num_cons:]
+
+        gap_ratio = torch.mean(integral_gap).item()
+
+        # Read and solve the LP relaxation to generate initial objective value
+        lp_model = mip_model.relax()
+        lp_model.optimize()
+        lp_obj = lp_model.ObjVal
+        lp_sol = lp_model.Xn
+
+        mip_obj = lp_obj
+        # TODO: Try to replace with GRB.SENSE instead of Constants.MIN_PROBLEMS/MAX_PROBLEMS
+        if problem_type in Constants.MIN_PROBLEMS:
+            # Minimization: interpret gap_ratio as “how close MIP is to LP”
+            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
+            mip_obj = lp_obj + (lp_obj * (1 - gap_ratio))
+        elif problem_type in Constants.MAX_PROBLEMS:
+            # Maximization: interpret gap_ratio as mip_obj / lp_obj in (0, 1]
+            # Small safety margin to the ratio to make sure we are not infeasible
+            gap_ratio += (self.integral_gap_safety_eps * gap_ratio)
+            mip_obj = lp_obj * gap_ratio
+        else:
+            raise ValueError(f"Error: Unknown problem type '{problem_type}' for mip_model_to_gapinfo")
+
+        # Create GapInfo with true lp_obj, predicted ratio, and predicted mip_obj but without a mip solution
+        gap_info = GapInfo(lp_obj=lp_obj, lp_sol=lp_sol, mip_obj=mip_obj, mip_sol=None, gap_ratio=gap_ratio)
+
+        return gap_info
 
     def _mip_model_to_hint(self, mip_model: gp.Model, prob_type: str = 'SC') -> HintInfo:
         """Generate warm-start hints for a MIP model using the variable probability head.
@@ -1241,12 +1242,10 @@ class Forge(nn.Module):
         hint_pri_ones = [int(x) for x in global_pos_rank[hint_ones]]
         hint_pri_zeros = [int(x) for x in global_neg_rank[hint_zeros]]
 
-        return HintInfo(
-            hint_ones=hint_ones,
-            hint_zeros=hint_zeros,
-            hint_pri_ones=hint_pri_ones,
-            hint_pri_zeros=hint_pri_zeros
-        )
+        return HintInfo(hint_ones=hint_ones,
+                        hint_zeros=hint_zeros,
+                        hint_pri_ones=hint_pri_ones,
+                        hint_pri_zeros=hint_pri_zeros)
 
     @staticmethod
     def _validate_args(train_config_file_path) -> None:
