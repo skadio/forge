@@ -15,7 +15,7 @@
 
 ---
 
-# Forge: Foundational Optimization Embeddings From Graph Embeddings
+# Forge: Foundational Optimization Representations From Graph Embeddings
 [Forge](https://skadio.github.io/forge/) is a research library designed for representational learning in combinatorial optimization. It provides tools for generating embeddings from MIP instances, pre-training models on these embeddings, and fine-tuning them for specific tasks such as predicting integral gap, search guidance, backdoor prediction, and solver configuration.
 
 ## Quick Start
@@ -33,19 +33,19 @@ forge --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/t
 forge --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_pretrain.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
 ```
 
-**Access Request:** The [pretrained Forge model](https://huggingface.co/skadio/forge) is gated: please request access first. 
+**Access Request:** The [pretrained Forge model](https://huggingface.co/skadio/forge) is gated, please request access first. 
 Without an HF token with approved access, the load from Hugging Face will fail.
 
 ## Available Functionality
 
 | Functionality                                                             | Description                                                                                      |
 |---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
-| [Generate MIP Info](#generate-mip-info)                                   | Build and serialize MIPInfo objects from raw MIP instances for reuse in downstream pre-training. |
+| [Generate MIP Info](#generate-mip-info)                                | Build and serialize MIPInfo objects from raw MIP instances for reuse in downstream pre-training. |
 | [Pre-Train Forge](#pre-train-embeddings)                                  | Pre-train Forge on MIP instances and their MIPInfo and save a pretrained model checkpoint.       |
-| [Generate Embeddings](#generate-embeddings)                               | Generate per-instance embeddings from a pretrained Forge model.                                  |
-| [Fine-Tune Integral Gap](#fine-tune-integral-gap)                         | Fine-tune Forge for integral-gap prediction on labeled GapInfo data.                             |
-| [Predict Integral Gap](#predict-integral-gap)                             | Run inference with a fine-tuned model to predict LP/MIP gap information (GapInfo).               |
-| [Fine-Tune Variable Probabilities](#fine-tune-variable-probabilities)      | Fine-tune Forge for variable 0/1 probability prediction on labeled TripletInfo data.             |
+| [Generate Embeddings](#generate-embeddings)                              | Generate per-instance embeddings from a pretrained Forge model (MIPEmbeddings).                  |
+| [Fine-Tune Integral Gap](#fine-tune-integral-gap)       | Fine-tune Forge for integral-gap prediction on labeled GapInfo data.                             |
+| [Predict Integral Gap](#predict-integral-gap)           | Run inference with a fine-tuned model to predict LP/MIP gap information (GapInfo).               |
+| [Fine-Tune Variable Probabilities](#fine-tune-variable-probabilities)     | Fine-tune Forge for variable 0/1 probability prediction on labeled TripletInfo data.             |
 | [Predict Integral Gap](#predict-integral-gap)                             | Run inference with a fine-tuned model to predict variable 0/1 probabilities (HintInfo).          |
 
 ## Generate MIP Info

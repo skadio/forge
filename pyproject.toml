@@ -7,7 +7,7 @@ name = "forge-mip"
 description = "Forge: Foundational Optimization Representation from Graph Embeddings"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "Apache-2.0"
+license = {text = "Apache License 2.0"}
 authors = [
     {name = "skadio"},
     {name = "zohairshafi"}
@@ -41,6 +41,9 @@ Source = "https://github.com/skadio/forge"
 
 [tool.setuptools.dynamic]
 version = {attr = "forge._version.__version__"}
+
+[tool.setuptools]
+license-files = []
 
 [tool.setuptools.packages.find]
 exclude = ["*.tests", "*.tests.*", "tests.*", "tests", "notebooks"]
