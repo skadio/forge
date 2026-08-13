@@ -5,7 +5,7 @@ import os
 # This will OVERWRITE the file in the HF repo if it exists
 # Useful to move large files from local to Modal (via HF as intermediary)
 # Otherwise, local_to_modal.py fails for large files with connection errors
-# Example: ./local_to_hf.py --file ./iclr_pretrain_clusters_mip_to_mipinfo.pkl
+# Example: ./local_to_hf.py --file ./pretrain_clusters_mip_to_mipinfo.pkl
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Upload a file to Hugging Face models")

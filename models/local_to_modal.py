@@ -6,7 +6,7 @@ models_volume = modal.Volume.from_name("models") #, create_if_missing=True)
 
 # This only works for SMALL files
 # For large files (GBs), first upload to HF, and then download from HF to Modal
-local_file = "iclr_pretrain_clusters_mip_to_mipinfo.log"
+local_file = "pretrain_clusters_mip_to_mipinfo.log"
 remote_path = f"./{local_file}"
 
 @app.local_entrypoint()
