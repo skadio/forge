@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "forge-mip"
 description = "Forge: Foundational Optimization Representation from Graph Embeddings"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = {text = "Apache License 2.0"}
 authors = [
     {name = "skadio"},
@@ -33,7 +33,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.scripts]
-forge = "scripts.mip_to_embeddings:main"
+forge = "forge.mip_to_embeddings:main"
 
 [project.urls]
 Documentation = "https://github.com/skadio/forge"
@@ -44,6 +44,9 @@ version = {attr = "forge._version.__version__"}
 
 [tool.setuptools]
 license-files = []
+
+[tool.setuptools.package-data]
+forge = ["configs/*.yaml"]
 
 [tool.setuptools.packages.find]
 exclude = ["*.tests", "*.tests.*", "tests.*", "tests", "notebooks"]
