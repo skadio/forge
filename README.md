@@ -164,7 +164,7 @@ finetune_integral_gap(forge=forge,
                       input_forge_pkl="./models/forge_pretrained.pkl",
                       model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                       input_mip_folder="./data/instances/",
-                      input_mip_instances_file="data/configs/iclr_fine_tune_integral_gap.txt",
+                      input_mip_instances_file="data/configs/fine_tune_integral_gap.txt",
                       output_forge_finetuned_pkl="./models/forge_integral_gap.pkl",
                       output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
                       num_parallel_workers=5)
@@ -173,7 +173,7 @@ finetune_integral_gap(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/iclr_fine_tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
+python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/fine_tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
 ```
 
 ## Predict Integral Gap
@@ -197,7 +197,7 @@ mip_to_gapinfo_dict = mip_to_gapinfo(forge=forge,
                                      input_forge_pkl="./models/forge_integral_gap.pkl",
                                      model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                      input_mips="./data/instances/",
-                                     input_mip_instances_file="./data/configs/iclr_test_integral_gap.txt",
+                                     input_mip_instances_file="./data/configs/test_integral_gap.txt",
                                      output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
                                      problem_type="CA")
 ```
@@ -205,7 +205,7 @@ mip_to_gapinfo_dict = mip_to_gapinfo(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_gapinfo --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_integral_gap.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/iclr_test_integral_gap.txt --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl --problem_type CA
+python -m scripts.mip_to_gapinfo --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_integral_gap.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_integral_gap.txt --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl --problem_type CA
 ```
 
 ## Fine-Tune Variable Probabilities
@@ -223,7 +223,7 @@ finetune_variable_proba(forge=forge,
                         input_forge_pkl="./models/forge_pretrained.pkl",
                         model_type=Constants.FORGE_FINE_TUNE_VARIABLE_PROBA,
                         input_mip_folder="./data/instances/",
-                        input_mip_instances_file="data/configs/iclr_fine_tune_variable_proba.txt",
+                        input_mip_instances_file="data/configs/fine_tune_variable_proba.txt",
                         output_forge_finetuned_pkl="./models/forge_variable_proba.pkl",
                         output_mip_to_tripletinfo_pkl="./models/output_mip_to_tripletinfo.pkl",
                         triplet_time_limit=300,
@@ -233,7 +233,7 @@ finetune_variable_proba(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.finetune_variable_proba --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/iclr_fine_tune_variable_proba.txt --output_forge_finetuned_pkl ./models/forge_variable_proba.pkl --output_mip_to_tripletinfo_pkl ./models/output_mip_to_tripletinfo.pkl
+python -m scripts.finetune_variable_proba --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/fine_tune_variable_proba.txt --output_forge_finetuned_pkl ./models/forge_variable_proba.pkl --output_mip_to_tripletinfo_pkl ./models/output_mip_to_tripletinfo.pkl
 ```
 
 ## Predict Variable Probabilities
@@ -256,7 +256,7 @@ mip_to_hintinfo_dict = mip_to_hint(forge=forge,
                                    input_forge_pkl="./models/forge_variable_proba.pkl",
                                    model_type=Constants.FORGE_FINE_TUNE_VARIABLE_PROBA,
                                    input_mips="./data/instances/",
-                                   input_mip_instances_file="./data/configs/iclr_test_variable_proba.txt",
+                                   input_mip_instances_file="./data/configs/test_variable_proba.txt",
                                    output_mip_to_hintinfo_pkl="./models/mip_to_hintinfo.pkl",
                                    problem_type="CA")
 ```
@@ -264,7 +264,7 @@ mip_to_hintinfo_dict = mip_to_hint(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_hint --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_variable_proba.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/iclr_test_variable_proba.txt --output_mip_to_hintinfo_pkl ./models/mip_to_hintinfo.pkl --problem_type CA
+python -m scripts.mip_to_hint --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_variable_proba.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_variable_proba.txt --output_mip_to_hintinfo_pkl ./models/mip_to_hintinfo.pkl --problem_type CA
 ```
 
 ## Installation
