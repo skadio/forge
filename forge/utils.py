@@ -35,8 +35,10 @@ class Constants(NamedTuple):
     _MIPINFO_NAME = "mip_to_mipinfo.pkl"
     _EMBEDDINGS_NAME = "mip_to_embeddings.pkl"
     _GAPINFO_NAME = "mip_to_gapinfo.pkl"
-    _FORGE_PKL_NAME = "trained.pkl"
-    _FORGE_LOG_NAME = "trained.log"
+    _TRIPLETINFO_NAME = "mip_to_tripletinfo.pkl"
+    _HINTINFO_NAME = "mip_to_hintinfo.pkl"
+    _FORGE_PKL_NAME = "forge_pretrained.pkl"
+    _FORGE_LOG_NAME = "forge_pretrain.log"
     _UNIT_TEST_INSTANCES_NAME = "instances_unit_test.txt"
 
     # Folders
@@ -51,6 +53,8 @@ class Constants(NamedTuple):
     default_mip_to_embeddings_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _MIPINFO_NAME
     default_mip_to_mipinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _MIPINFO_NAME
     default_mip_to_gapinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _GAPINFO_NAME
+    default_mip_to_tripletinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _TRIPLETINFO_NAME
+    default_mip_to_hintinfo_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _HINTINFO_NAME
     default_forge_pretrained_pkl = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_PKL_NAME
     default_forge_log_file = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _FORGE_LOG_NAME
     default_instances_unit_test_txt = _CONST_FILE_DIR + os.sep + ".." + os.sep + _TESTS_DIR_NAME + os.sep + _DATA_DIR_NAME + os.sep + _UNIT_TEST_INSTANCES_NAME

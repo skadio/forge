@@ -1,5 +1,53 @@
-# Forge: Foundational Optimization Embeddings From Graph Embeddings
+[![PyPI version](https://img.shields.io/pypi/v/forge-mip.svg?cacheSeconds=1)](https://pypi.org/project/forge-mip/)
+[![PyPI license](https://img.shields.io/pypi/l/forge-mip.svg?cacheSeconds=1)](https://pypi.python.org/pypi/forge-mip/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
+[![Downloads](https://static.pepy.tech/personalized-badge/forge-mip?period=total&units=international_system&left_color=grey&right_color=orange&left_text=Downloads)](https://pepy.tech/project/forge-mip)
+
+---
+
+<div align="center"><a name="menu"></a>
+  <h3>
+    <a href="https://github.com/skadio/forge?tab=readme-ov-file#quick-start">Quick-Start </a> •
+    <a href="https://github.com/skadio/forge?tab=readme-ov-file#available-functionality">Available Functionality </a> •
+    <a href="https://github.com/skadio/forge?tab=readme-ov-file#installation">Installation</a>
+  </h3>
+</div>
+
+---
+
+# Forge: Foundational Optimization Representations From Graph Embeddings
 [Forge](https://skadio.github.io/forge/) is a research library designed for representational learning in combinatorial optimization. It provides tools for generating embeddings from MIP instances, pre-training models on these embeddings, and fine-tuning them for specific tasks such as predicting integral gap, search guidance, backdoor prediction, and solver configuration.
+
+## Quick Start
+```bash
+# Install the library
+pip install forge-mip
+
+# Generate MIP Embeddings from the Hugging Face pre-trained Forge model and save the output
+# Export your Hugging Face Token, if not already set in your environment
+# export HF_TOKEN=<your_hugging_face_token>
+forge --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
+
+# Generate MIP Embeddings from a local pre-trained Forge model and save the output
+forge --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
+```
+
+**Note:** When no local model is found, `forge` downloads the pre-trained Forge model from Hugging Face and saves it to the package's models directory — for a `pip install`-ed package that is `<site-packages>/models/forge_pretrained.pkl`, not `./models/`. To use a model stored in the repo, place it at `./models/forge_pretrained.pkl` and pass `--input_forge_pkl ./models/forge_pretrained.pkl`.
+
+**Access Request:** The [pretrained Forge model](https://huggingface.co/skadio/forge) is gated, please request access first. 
+Without an HF token with approved access, the load from Hugging Face will fail.
+
+## Available Functionality
+
+| Functionality                                                             | Description                                                                                      |
+|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| [Generate MIP Info](#generate-mip-info)                                | Build and serialize MIPInfo objects from raw MIP instances for reuse in downstream pre-training. |
+| [Pre-Train Forge](#pre-train-embeddings)                                  | Pre-train Forge on MIP instances and their MIPInfo and save a pretrained model checkpoint.       |
+| [Generate Embeddings](#generate-embeddings)                              | Generate per-instance embeddings from a pretrained Forge model (MIPEmbeddings).                  |
+| [Fine-Tune Integral Gap](#fine-tune-integral-gap)       | Fine-tune Forge for integral-gap prediction on labeled GapInfo data.                             |
+| [Predict Integral Gap](#predict-integral-gap)           | Run inference with a fine-tuned model to predict LP/MIP gap information (GapInfo).               |
+| [Fine-Tune Variable Probabilities](#fine-tune-variable-probabilities)     | Fine-tune Forge for variable 0/1 probability prediction on labeled TripletInfo data.             |
+| [Predict Variable Probabilities](#predict-variable-probabilities)         | Run inference with a fine-tuned model to predict variable 0/1 probabilities (HintInfo).          |
 
 ## Generate MIP Info
 
@@ -85,19 +133,20 @@ forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 # The output mip_to_embeddings pickle is stored as output_mip_to_embeddings_pkl
 #   Each MIP instance is mapped to a MIPEmbeddings object, Dict[str, MIPEmbeddings], containing: 
 #       - instance_embedding: np.ndarray (codebook_size)
-#       - embeddings_of_constraint[c]: torch.Tensor(num_constraints, codebook_dim)
-#       - embeddings_of_variable[v]: torch.Tensor(num_constraints, codebook_dim) 
+#       - embedding_of_constraint: torch.Tensor (num_constraints, codebook_dim)
+#       - embedding_of_variable: torch.Tensor (num_variables, codebook_dim)
 mip_to_embeddings_dict = mip_to_embeddings(forge=forge,
                                            input_mips="./data/instances/",
-                                           input_mip_instances_file="./data/configs/test_pretrain.txt",
+                                           input_mip_instances_file="./data/configs/test.txt",
                                            input_forge_pkl="./models/forge_pretrained.pkl",
                                            model_type=Constants.FORGE_PRE_TRAIN,
+                                           instance_embedding_only=False,
                                            output_mip_to_embeddings_pkl="./models/mip_to_embeddings.pkl")
 ```
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.mip_to_embeddings --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test_pretrain.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
+python -m scripts.mip_to_embeddings --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/test.txt --output_mip_to_embeddings_pkl ./models/mip_to_embeddings.pkl
 ```
 
 ## Fine-Tune Integral Gap
@@ -115,7 +164,7 @@ finetune_integral_gap(forge=forge,
                       input_forge_pkl="./models/forge_pretrained.pkl",
                       model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                       input_mip_folder="./data/instances/",
-                      input_mip_instances_file="data/configs/tune_integral_gap.txt",
+                      input_mip_instances_file="data/configs/iclr_fine_tune_integral_gap.txt",
                       output_forge_finetuned_pkl="./models/forge_integral_gap.pkl",
                       output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
                       num_parallel_workers=5)
@@ -124,7 +173,7 @@ finetune_integral_gap(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
+python -m scripts.finetune_integral_gap --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/iclr_fine_tune_integral_gap.txt --output_forge_finetuned_pkl ./models/forge_integral_gap.pkl --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl
 ```
 
 ## Predict Integral Gap
@@ -135,7 +184,7 @@ from forge.pipeline import mip_to_gapinfo
 from forge.utils import Constants
 
 # Forge model with its pre-trained configuration
-forge = Forge(train_config_yaml="/forge/configs/train_config.yaml")
+forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
 
 # Predict integral gaps
 # Each MIP instance is mapped to a GapInfo object, Dict[str, GapInfo], containing:
@@ -148,7 +197,7 @@ mip_to_gapinfo_dict = mip_to_gapinfo(forge=forge,
                                      input_forge_pkl="./models/forge_integral_gap.pkl",
                                      model_type=Constants.FORGE_FINE_TUNE_INTEGRAL_GAP,
                                      input_mips="./data/instances/",
-                                     input_mip_instances_file="./data/configs/test_fine_tune_integral_gap.txt",
+                                     input_mip_instances_file="./data/configs/iclr_test_integral_gap.txt",
                                      output_mip_to_gapinfo_pkl="./models/mip_to_gapinfo.pkl",
                                      problem_type="CA")
 ```
@@ -156,11 +205,70 @@ mip_to_gapinfo_dict = mip_to_gapinfo(forge=forge,
 ##### Command Line
 ```bash
 cd forge
-python -m forge.scripts.mip_to_gapinfo --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_integral_gap.pkl --input_mips ./data/instaces/ --input_mip_instances_file ./data/configs/test_fine_tune_integral_gap.txt --output_mip_to_gap_info_pkl ./models/mip_to_gapinfo.pkl --problem_type AC
+python -m scripts.mip_to_gapinfo --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_integral_gap.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/iclr_test_integral_gap.txt --output_mip_to_gapinfo_pkl ./models/mip_to_gapinfo.pkl --problem_type CA
+```
+
+## Fine-Tune Variable Probabilities
+
+```python
+from forge.embeddings import Forge
+from forge.pipeline import finetune_variable_proba
+from forge.utils import Constants
+
+# Forge model with its pre-trained configuration
+forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
+# Fine-tune Forge to predict variable probabilities
+finetune_variable_proba(forge=forge,
+                        input_forge_pkl="./models/forge_pretrained.pkl",
+                        model_type=Constants.FORGE_FINE_TUNE_VARIABLE_PROBA,
+                        input_mip_folder="./data/instances/",
+                        input_mip_instances_file="data/configs/iclr_fine_tune_variable_proba.txt",
+                        output_forge_finetuned_pkl="./models/forge_variable_proba.pkl",
+                        output_mip_to_tripletinfo_pkl="./models/output_mip_to_tripletinfo.pkl",
+                        triplet_time_limit=300,
+                        triplet_num_solutions=5)
+``` 
+
+##### Command Line
+```bash
+cd forge
+python -m scripts.finetune_variable_proba --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_pretrained.pkl --input_mip_folder ./data/instances/ --input_mip_instances_file ./data/configs/iclr_fine_tune_variable_proba.txt --output_forge_finetuned_pkl ./models/forge_variable_proba.pkl --output_mip_to_tripletinfo_pkl ./models/output_mip_to_tripletinfo.pkl
+```
+
+## Predict Variable Probabilities
+
+```python
+from forge.embeddings import Forge
+from forge.pipeline import mip_to_hint
+from forge.utils import Constants
+
+# Forge model with its pre-trained configuration
+forge = Forge(train_config_yaml="./forge/configs/train_config.yaml")
+
+# Predict variable 0/1 probabilities
+# Each MIP instance is mapped to a HintInfo object, Dict[str, HintInfo], containing:
+#   - hint_ones: variable indices to hint as 1
+#   - hint_zeros: variable indices to hint as 0
+#   - hint_pri_ones: priority ranks for the 1-hints (higher = more confident)
+#   - hint_pri_zeros: priority ranks for the 0-hints (higher = more confident)
+mip_to_hintinfo_dict = mip_to_hint(forge=forge,
+                                   input_forge_pkl="./models/forge_variable_proba.pkl",
+                                   model_type=Constants.FORGE_FINE_TUNE_VARIABLE_PROBA,
+                                   input_mips="./data/instances/",
+                                   input_mip_instances_file="./data/configs/iclr_test_variable_proba.txt",
+                                   output_mip_to_hintinfo_pkl="./models/mip_to_hintinfo.pkl",
+                                   problem_type="CA")
+```
+
+##### Command Line
+```bash
+cd forge
+python -m scripts.mip_to_hint --train_config_yaml ./forge/configs/train_config.yaml --input_forge_pkl ./models/forge_variable_proba.pkl --input_mips ./data/instances/ --input_mip_instances_file ./data/configs/iclr_test_variable_proba.txt --output_mip_to_hintinfo_pkl ./models/mip_to_hintinfo.pkl --problem_type CA
 ```
 
 ## Installation
-Forge requires **Python 3.10** and can be installed via `pip install forge`. 
+Forge requires **Python 3.10 or newer** and can be installed via `pip install forge-mip`. 
 
 ### Installation from Source Code
 ```
@@ -168,7 +276,7 @@ git clone https://github.com/skadio/forge.git
 cd forge
 pip install build # if build is not installed
 python -m build
-pip install dist/forge-X.X.X-py3-none-any.whl
+pip install dist/forge_mip-X.X.X-py3-none-any.whl
 ```
 
 ### Test Your Setup

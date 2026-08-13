@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "forge"
+name = "forge-mip"
 description = "Forge: Foundational Optimization Representation from Graph Embeddings"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
+license = {text = "Apache License 2.0"}
 authors = [
     {name = "skadio"},
     {name = "zohairshafi"}
@@ -32,12 +32,21 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+forge = "forge.mip_to_embeddings:main"
+
 [project.urls]
 Documentation = "https://github.com/skadio/forge"
 Source = "https://github.com/skadio/forge"
 
 [tool.setuptools.dynamic]
 version = {attr = "forge._version.__version__"}
+
+[tool.setuptools]
+license-files = []
+
+[tool.setuptools.package-data]
+forge = ["configs/*.yaml"]
 
 [tool.setuptools.packages.find]
 exclude = ["*.tests", "*.tests.*", "tests.*", "tests", "notebooks"]

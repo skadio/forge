@@ -603,6 +603,53 @@
       word-break: break-word;
     }
 
+        /* ── HERO INSTALL ROW ── */
+    .install-top-row {
+      margin-top: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .install-command {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.45rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card-bg);
+    }
+    .install-label {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(192,57,43,0.08);
+      border-radius: 4px;
+      padding: 0.2rem 0.45rem;
+    }
+    .install-command code {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      color: var(--ink);
+      background: none;
+      padding: 0;
+    }
+    .downloads-badge {
+      display: inline-flex;
+    }
+    .downloads-badge img {
+      height: 22px;
+      width: auto;
+      display: block;
+      border-radius: 4px;
+    }
+
     /* ── ANCHOR ── */
     .anchor-link {
       display: inline-flex;
@@ -767,6 +814,12 @@
 }</pre>
     </div>
   </div>
+     <div class="install-top-row">
+      <div class="install-command"><span class="install-label">Install</span><code>pip install forge-mip</code></div>
+      <a href="https://pepy.tech/project/forge-mip" class="downloads-badge" target="_blank" rel="noopener noreferrer">
+        <img src="https://static.pepy.tech/personalized-badge/forge-mip?period=total&units=international_system&left_color=grey&right_color=orange&left_text=Downloads" alt="Forge downloads">
+      </a>
+    </div>
 </header>
 
 <!-- ─── OVERVIEW ─── -->
@@ -973,7 +1026,7 @@
 }</pre>
   </div>
 </section>
-  
+
 <!-- ─── ACK  ─── -->
 <section id="acknowledgment">
   <div class="section-header">
@@ -1050,4 +1103,3 @@ function copyAnchor(id) {
 
 </body>
 </html>
-
